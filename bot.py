@@ -266,16 +266,16 @@ def download_tiktok_pure(url, target_dir):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "💎 **سلام به ربات دانلودر پیشرفته خوش آمدید!**\n\n"
-        "⚡️ **پلتفرم‌های پشتیبانی‌شده:**\n"
-        "▫️ **Spotify** (دانلود موزیک همراه با کاور و متادیتای دقیق)\n"
-        "▫️ **YouTube & YouTube Music** (کیفیت‌های HD/4K + MP3)\n"
-        "▫️ **Instagram** (پست، ریلز و استوری)\n"
-        "▫️ **TikTok** (دانلود بدون واترمارک)\n"
-        "▫️ **Pinterest & Reddit & SoundCloud**\n\n"
-        "🔗 **کافیست لینک رسانه مورد نظر خود را ارسال کنید:**"
+        "💎 <b>سلام به ربات دانلودر پیشرفته خوش آمدید!</b>\n\n"
+        "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
+        "▫️ <b>Spotify</b> (دانلود موزیک همراه با کاور و متادیتای دقیق)\n"
+        "▫️ <b>YouTube & YouTube Music</b> (کیفیت‌های HD/4K + MP3)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و استوری)\n"
+        "▫️ <b>TikTok</b> (دانلود بدون واترمارک)\n"
+        "▫️ <b>Pinterest & Reddit & SoundCloud</b>\n\n"
+        "🔗 <b>کافیست لینک رسانه مورد نظر خود را ارسال کنید:</b>"
     )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+    await update.message.reply_text(welcome_text, parse_mode="HTML")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -290,7 +290,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not text.startswith(("http://", "https://")):
-        await message.reply_text("❌ **لطفاً یک لینک معتبر اینترنتی ارسال کنید.**", parse_mode="Markdown")
+        await message.reply_text("❌ <b>لطفاً یک لینک معتبر اینترنتی ارسال کنید.</b>", parse_mode="HTML")
         return
 
     url = text
@@ -299,18 +299,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("📥 دانلود بدون واترمارک (HD)", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'TikTok Media', 'is_audio_only': False}
-        await update.message.reply_text("🎵 **پست تیک‌تاک شناسایی شد.**\nجهت دریافت فایل روی دکمه زیر کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text("🎵 <b>پست تیک‌تاک شناسایی شد.</b>\nجهت دریافت فایل روی دکمه زیر کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     if "reddit.com" in url or "r.reddit.com" in url:
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Reddit Post', 'is_audio_only': False}
         keyboard = [[InlineKeyboardButton("⚡️ استخراج مستقیم رسانه", callback_data="fmt_best")]]
-        await update.message.reply_text("📌 **پست ردیت شناسایی شد.**\nجهت دریافت بدون محدودیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text("📌 <b>پست ردیت شناسایی شد.</b>\nجهت دریافت بدون محدودیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     if "spotify.com" in url:
-        progress_msg = await update.message.reply_text("🔍 **در حال استخراج دقیق متادیتا و کاور از اسپاتیفای...**", parse_mode="Markdown")
+        progress_msg = await update.message.reply_text("🔍 <b>در حال استخراج دقیق متادیتا و کاور از اسپاتیفای...</b>", parse_mode="HTML")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
         await progress_msg.delete()
         
@@ -327,18 +327,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         caption = (
-            f"🎵 **عنوان اثر:** {title}\n"
-            f"👤 **خواننده:** {artist}\n\n"
-            f"✨ **پلتفرم دانلود مورد نظر را انتخاب کنید:**"
+            f"🎵 <b>عنوان اثر:</b> {title}\n"
+            f"👤 <b>خواننده:</b> {artist}\n\n"
+            f"✨ <b>پلتفرم دانلود مورد نظر را انتخاب کنید:</b>"
         )
         if thumbnail:
-            await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if "soundcloud.com" in url:
-        progress_msg = await update.message.reply_text("🔍 **در حال بررسی لینک ساندکلاد...**", parse_mode="Markdown")
+        progress_msg = await update.message.reply_text("🔍 <b>در حال بررسی لینک ساندکلاد...</b>", parse_mode="HTML")
         sc_title, sc_thumbnail = "SoundCloud Track", None
         try:
             ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
@@ -351,26 +351,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['url'] = url
         context.user_data['info'] = {'is_audio_only': True, 'title': sc_title}
         keyboard = [[InlineKeyboardButton("🎧 دانلود کیفیت عالی (MP3)", callback_data="fmt_audio")]]
-        caption = f"🎧 **موزیک ساندکلاد:**\n📌 **نام:** {sc_title}"
-        if sc_thumbnail: await update.message.reply_photo(photo=sc_thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        caption = f"🎧 <b>موزیک ساندکلاد:</b>\n📌 <b>نام:</b> {sc_title}"
+        if sc_thumbnail: await update.message.reply_photo(photo=sc_thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        else: await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if "pinterest" in url or "pin.it" in url:
         keyboard = [[InlineKeyboardButton("📸 دانلود تصویر / ویدیو کیفیت اصلی", callback_data="fmt_fallback_direct")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Pinterest Media', 'is_audio_only': False}
-        await update.message.reply_text("📸 **پینترست شناسایی شد.**\nجهت دریافت فایل اصلی کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text("📸 <b>پینترست شناسایی شد.</b>\nجهت دریافت فایل اصلی کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     if "instagram.com" in url:
         keyboard = [[InlineKeyboardButton("📥 دانلود فوری پست / ریلز", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
-        await update.message.reply_text("🎬 **اینستاگرام شناسایی شد.**\nبرای دانلود با بهترین کیفیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد.</b>\nبرای دانلود با بهترین کیفیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
-    progress_msg = await update.message.reply_text("🧠 **در حال آنالیز لینک و بررسی کیفیت‌های موجود...**", parse_mode="Markdown")
+    progress_msg = await update.message.reply_text("🧠 <b>در حال آنالیز لینک و بررسی کیفیت‌های موجود...</b>", parse_mode="HTML")
     try:
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -400,23 +400,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard.append([InlineKeyboardButton("🎵 استخراج فقط صدا (MP3 Audio)", callback_data="fmt_audio")])
         await progress_msg.delete()
-        caption = f"🎬 **رسانه شناسایی شد:**\n📌 **عنوان:** {title}\n\n👇 **کیفیت مورد نظرتان را انتخاب کنید:**"
-        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        caption = f"🎬 <b>رسانه شناسایی شد:</b>\n📌 <b>عنوان:</b> {title}\n\n👇 <b>کیفیت مورد نظرتان را انتخاب کنید:</b>"
+        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        else: await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
     except Exception as e:
         keyboard = [[InlineKeyboardButton("⚡️ دانلود مستقیم (پشتیبان)", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Media', 'is_audio_only': False}
         await progress_msg.delete()
-        await update.message.reply_text("⚠️ **آنالیز کیفیت‌ها موفق نبود. تلاش جهت دانلود مستقیم؟**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await update.message.reply_text("⚠️ <b>آنالیز کیفیت‌ها موفق نبود. تلاش جهت دانلود مستقیم؟</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 async def edit_message_safe(query, text):
     try:
         if query.message.photo or query.message.caption: 
-            await query.message.edit_caption(caption=text, parse_mode="Markdown")
+            await query.message.edit_caption(caption=text, parse_mode="HTML")
         else: 
-            await query.edit_message_text(text=text, parse_mode="Markdown")
+            await query.edit_message_text(text=text, parse_mode="HTML")
     except: pass
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -428,7 +428,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = context.user_data.get('info')
     
     if not url or not info:
-        await query.message.reply_text("❌ **اطلاعات نشست منقضی شده است. لطفاً لینک را دوباره ارسال کنید.**", parse_mode="Markdown")
+        await query.message.reply_text("❌ <b>اطلاعات نشست منقضی شده است. لطفاً لینک را دوباره ارسال کنید.</b>", parse_mode="HTML")
         return
         
     main_loop = asyncio.get_running_loop()
@@ -438,7 +438,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nonlocal last_update_time
         current_time = time.time()
         if d['status'] == 'finished':
-            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "⚡️ **دانلود کامل شد! در حال پردازش و تبدیل...**"), main_loop)
+            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "⚡️ <b>دانلود کامل شد! در حال پردازش و تبدیل...</b>"), main_loop)
             return
         if d['status'] == 'downloading' and current_time - last_update_time > 0.5:
             last_update_time = current_time
@@ -450,9 +450,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 speed_mb = speed / (1024 * 1024) if speed > 0 else 0
                 filled_blocks = int(percent // 10)
                 bar = "🟦" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📥 **در حال دریافت فایل از سرور...**\n\n{bar} `{percent:.1f}%` \n🚀 **سرعت:** `{speed_mb:.2f} MB/s`"
+                status_text = f"📥 <b>در حال دریافت فایل از سرور...</b>\n\n{bar} <code>{percent:.1f}%</code> \n🚀 <b>سرعت:</b> <code>{speed_mb:.2f} MB/s</code>"
             else:
-                status_text = "📥 **در حال استخراج و دانلود فایل...**"
+                status_text = "📥 <b>در حال استخراج و دانلود فایل...</b>"
             asyncio.run_coroutine_threadsafe(edit_message_safe(query, status_text), main_loop)
 
     is_reddit = "reddit.com" in url or "r.reddit.com" in url
@@ -496,7 +496,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ydl_opts['format'] = f"{fmt_id}+bestaudio/best"
         ydl_opts['merge_output_format'] = 'mp4'
     elif not is_instagram and data.startswith("direct_"):
-        fmt_id = data.split("_")[1]
         ydl_opts['format'] = fmt_id
     elif not is_instagram:
         ydl_opts['format'] = 'bestvideo+bestaudio/best'
@@ -521,7 +520,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_image_doc = False
     
     try:
-        await edit_message_safe(query, "⚡️ **در حال اتصال به سرور و دانلود فایل اصلی...**")
+        await edit_message_safe(query, "⚡️ <b>در حال اتصال به سرور و دانلود فایل اصلی...</b>")
         
         if is_tiktok:
             try:
@@ -617,38 +616,38 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 percent = (uploaded_bytes / total_bytes) * 100
                 filled_blocks = int(percent // 10)
                 bar = "🟩" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📤 **در حال آپلود روی تلگرام...**\n\n{bar} `{percent:.1f}%`"
+                status_text = f"📤 <b>در حال آپلود روی تلگرام...</b>\n\n{bar} <code>{percent:.1f}%</code>"
                 context.application.create_task(edit_message_safe(query, status_text))
 
         _, ext = os.path.splitext(filename.lower())
         
         with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
             
-            # این خطوط اضافه شدن تا ارور ۴۲ تلگرام رو کلا از بین ببرن (کاراکترهای مزاحم پاک میشن)
-            safe_title = str(res_title).replace('_', ' ').replace('*', ' ').replace('[', '').replace(']', '').replace('`', '')
+            # اصلاح ایمن کاراکترها برای جلوگیری از ارور HTML تلگرام
+            safe_title = str(res_title).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
             if is_audio:
-                artist_name = str(info.get('artist', 'نامشخص')).replace('_', ' ').replace('*', '')
-                song_title = str(info.get('title', res_title)).replace('_', ' ').replace('*', '')
-                caption_text = f"🎵 **{song_title}**\n👤 **خواننده:** {artist_name}\n\n🤖 @Heisenberg_bot"
+                artist_name = str(info.get('artist', 'نامشخص')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                song_title = str(info.get('title', res_title)).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                caption_text = f"🎵 <b>{song_title}</b>\n👤 <b>خواننده:</b> {artist_name}\n\n🤖 @Heisenberg_bot"
                 await context.bot.send_audio(
                     chat_id=chat_id, audio=tracked_file, 
                     filename=f"{artist_name} - {song_title}.mp3",
                     caption=caption_text, 
                     performer=artist_name, 
                     title=song_title,
-                    read_timeout=180, write_timeout=180, parse_mode="Markdown"
+                    read_timeout=180, write_timeout=180, parse_mode="HTML"
                 )
             elif (ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif'] or is_image_doc) and ext != '.mp4':
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=tracked_file,
-                    caption=f"🖼️ **{safe_title}**\n\n🤖 @Heisenberg_bot", parse_mode="Markdown"
+                    caption=f"🖼️ <b>{safe_title}</b>\n\n🤖 @Heisenberg_bot", parse_mode="HTML"
                 )
             else:
                 await context.bot.send_video(
                     chat_id=chat_id, video=tracked_file, filename=os.path.basename(filename),
-                    caption=f"🎬 **{safe_title}**\n\n🤖 @Heisenberg_bot", 
-                    read_timeout=180, write_timeout=180, parse_mode="Markdown"
+                    caption=f"🎬 <b>{safe_title}</b>\n\n🤖 @Heisenberg_bot", 
+                    read_timeout=180, write_timeout=180, parse_mode="HTML"
                 )
         
         if filename and os.path.exists(filename): os.remove(filename)
@@ -661,7 +660,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for f in downloaded_files:
             if os.path.exists(f): os.remove(f)
         clean_err = str(e).replace("ERROR:", "").strip()
-        await query.message.reply_text(f"❌ **خطا در دانلود یا ارسال نهایی:**\n`{clean_err}`", parse_mode="Markdown")
+        await query.message.reply_text(f"❌ <b>خطا در دانلود یا ارسال نهایی:</b>\n<code>{clean_err}</code>", parse_mode="HTML")
 
 def main():
     if not os.path.exists('downloads'): os.makedirs('downloads')
@@ -671,7 +670,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with fixed Telegram Markdown parsing...")
+    print("Bot is running successfully with fixed Telegram HTML parsing...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
