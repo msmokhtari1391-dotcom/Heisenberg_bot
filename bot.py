@@ -58,57 +58,71 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 def download_instagram_pure(url, target_dir):
-    """استخراج کامل تمام اسلایدهای کاروسل اینستاگرام (پشتیبانی تا ۲۵ اسلاید)"""
-    clean_url = url.split('?')[0].rstrip('/')
-    shortcode = clean_url.split('/p/')[-1].split('/reel/')[-1].split('/')[0]
+    """استخراج مستقیم و قدرتمند اسلایدها و ریلز اینستاگرام با موتور Cobalt API"""
+    clean_url = url.split('?')[0]
     session = requests.Session()
     
-    headers = {
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-        'Accept': 'application/json, text/plain, */*',
+    cobalt_instances = [
+        "https://cobalt-api.kwiatekm.tokyo",
+        "https://api.cobalt.tools",
+        "https://cobalt.q1.i.ng"
+    ]
+    
+    payload = {
+        "url": clean_url,
+        "videoQuality": "max",
+        "filenamePattern": "basic"
     }
-
+    
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": BROWSER_HEADERS['User-Agent']
+    }
+    
     downloaded_paths = []
-
-    # روش اول: اسکرپ مستقیم اسلایدها از سرور ddinstagram (فوق‌العاده سریع و بدون بن شدن)
-    for i in range(1, 25):
-        img_url = f"https://ddinstagram.com/images/{shortcode}/{i}"
-        vid_url = f"https://ddinstagram.com/videos/{shortcode}/{i}"
-        
-        # ۱. چک کردن ویدیو
+    
+    for instance in cobalt_instances:
         try:
-            v_res = session.head(vid_url, headers=headers, allow_redirects=True, timeout=4)
-            if v_res.status_code == 200 and 'video' in v_res.headers.get('Content-Type', ''):
-                out_path = os.path.join(target_dir, f"ig_{shortcode}_{i-1:02d}.mp4")
-                r = session.get(vid_url, stream=True, timeout=10)
-                with open(out_path, 'wb') as f:
-                    for chunk in r.iter_content(8192): f.write(chunk)
-                downloaded_paths.append(out_path)
-                continue
-        except: pass
+            res = session.post(f"{instance}/", json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                status = data.get("status")
+                
+                # تک فایل (ویدیو یا عکس)
+                if status in ["redirect", "tunnel"]:
+                    media_url = data.get("url")
+                    ext = ".mp4" if "video" in res.text or ".mp4" in media_url else ".jpg"
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_00{ext}")
+                    r = session.get(media_url, stream=True, timeout=15)
+                    with open(out_path, 'wb') as f:
+                        for chunk in r.iter_content(8192): f.write(chunk)
+                    return [out_path]
 
-        # ۲. چک کردن عکس
-        try:
-            i_res = session.head(img_url, headers=headers, allow_redirects=True, timeout=4)
-            if i_res.status_code == 200 and 'image' in i_res.headers.get('Content-Type', ''):
-                out_path = os.path.join(target_dir, f"ig_{shortcode}_{i-1:02d}.jpg")
-                r = session.get(img_url, stream=True, timeout=10)
-                with open(out_path, 'wb') as f:
-                    for chunk in r.iter_content(8192): f.write(chunk)
-                downloaded_paths.append(out_path)
-            else:
-                if i > 1:
-                    break
-        except:
-            if i > 1:
-                break
+                # حالت کاروسل / چند اسلاید (Picker)
+                elif status == "picker":
+                    picker_items = data.get("picker", [])
+                    for idx, item in enumerate(picker_items):
+                        media_url = item.get("url")
+                        m_type = item.get("type", "photo")
+                        ext = ".mp4" if m_type == "video" else ".jpg"
+                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}{ext}")
+                        
+                        r = session.get(media_url, stream=True, timeout=15)
+                        if r.status_code == 200:
+                            with open(out_path, 'wb') as f:
+                                for chunk in r.iter_content(8192): f.write(chunk)
+                            downloaded_paths.append(out_path)
+                            
+                    if downloaded_paths:
+                        downloaded_paths.sort()
+                        return downloaded_paths
+        except Exception:
+            continue
 
-    if downloaded_paths:
-        downloaded_paths.sort()
-        return downloaded_paths
-
-    # روش دوم: دانلود مستقیم با yt-dlp
+    # فال‌بک با yt-dlp در صورت عدم پاسخ‌دهی سرورها
     try:
+        shortcode = clean_url.split('/p/')[-1].split('/reel/')[-1].split('/')[0]
         ydl_opts = {
             'outtmpl': os.path.join(target_dir, f'ig_{shortcode}_%(playlist_index)02d.%(ext)s'),
             'quiet': True,
@@ -576,7 +590,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال دریافت اسلایدها...</b>")
         
-        # پردازش اختصاصی تمام اسلایدهای اینستاگرام
+        # پردازش اختصاصی تمام اسلایدهای اینستاگرام با موتور Cobalt
         if is_instagram:
             try:
                 ig_files = await main_loop.run_in_executor(
