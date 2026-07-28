@@ -59,113 +59,46 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 # ---------------------------------------------------------
-# بخش اینستاگرام (عکس، کاروسل و ریلز)
+# بخش اینستاگرام (مستقیم با yt-dlp)
 # ---------------------------------------------------------
 def download_instagram_pure(url, target_dir):
     clean_url = url.split('?')[0].rstrip('/')
-    session = requests.Session()
     
-    api_endpoints = [
-        "https://api.cobalt.tools/",
-        "https://cobalt-api.kwiatekm.tokyo/",
-        "https://co.wuk.sh/",
-        "https://cobalt.q1.i.ng/"
-    ]
-    
-    payload = {
-        "url": clean_url,
-        "videoQuality": "max",
-        "filenamePattern": "basic"
+    ydl_opts = {
+        'outtmpl': os.path.join(target_dir, f"ig_{int(time.time())}_%(no_overwrites)s.%(ext)s"),
+        'quiet': True,
+        'no_warnings': True,
+        'http_headers': BROWSER_HEADERS,
+        'format': 'bestvideo+bestaudio/best',
     }
-    
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": BROWSER_HEADERS['User-Agent']
-    }
-    
-    downloaded_paths = []
-    
-    for endpoint in api_endpoints:
-        try:
-            res = session.post(endpoint, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                status = data.get("status")
-                
-                if status in ["redirect", "tunnel"]:
-                    media_url = data.get("url")
-                    ext = ".jpg"
-                    if ".mp4" in media_url or "video" in media_url.lower():
-                        ext = ".mp4"
-                        
-                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_00{ext}")
-                    r = session.get(media_url, stream=True, timeout=20)
-                    if r.status_code == 200:
-                        ct = r.headers.get('content-type', '')
-                        if 'video' in ct and not out_path.endswith('.mp4'):
-                            out_path = out_path.replace('.jpg', '.mp4')
-                        elif 'image' in ct and not out_path.endswith('.jpg'):
-                            out_path = out_path.replace('.mp4', '.jpg')
 
-                        with open(out_path, 'wb') as f:
-                            for chunk in r.iter_content(8192): f.write(chunk)
-                        return [out_path]
-
-                elif status == "picker":
-                    picker_items = data.get("picker", [])
-                    for idx, item in enumerate(picker_items):
-                        media_url = item.get("url")
-                        m_type = item.get("type", "photo")
-                        ext = ".mp4" if m_type == "video" else ".jpg"
-                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}{ext}")
-                        
-                        r = session.get(media_url, stream=True, timeout=20)
-                        if r.status_code == 200:
-                            with open(out_path, 'wb') as f:
-                                for chunk in r.iter_content(8192): f.write(chunk)
-                            downloaded_paths.append(out_path)
-                            
-                    if downloaded_paths:
-                        downloaded_paths.sort()
-                        return downloaded_paths
-        except Exception:
-            continue
+    files_before = set(os.listdir(target_dir)) if os.path.exists(target_dir) else set()
 
     try:
-        backup_api = f"https://api.v2.tikwm.com/api/?url={clean_url}"
-        res = session.get(backup_api, timeout=10).json()
-        if res.get("data"):
-            data = res["data"]
-            if "images" in data and data["images"]:
-                for idx, img_u in enumerate(data["images"]):
-                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}.jpg")
-                    r = session.get(img_u, timeout=15)
-                    if r.status_code == 200:
-                        with open(out_path, 'wb') as f: f.write(r.content)
-                        downloaded_paths.append(out_path)
-                if downloaded_paths:
-                    return downloaded_paths
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([clean_url])
 
-            v_url = data.get("play") or data.get("wmplay")
-            if v_url:
-                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
-                r = session.get(v_url, stream=True, timeout=15)
-                with open(out_path, 'wb') as f:
-                    for chunk in r.iter_content(8192): f.write(chunk)
-                return [out_path]
+        files_after = set(os.listdir(target_dir)) if os.path.exists(target_dir) else set()
+        downloaded = list(files_after - files_before)
+
+        if downloaded:
+            return [os.path.join(target_dir, f) for f in downloaded]
+        else:
+            latest = find_latest_downloaded_file(target_dir, max_age_seconds=60)
+            if latest:
+                return [latest]
     except Exception:
         pass
 
-    raise Exception("دریافت رسانه اینستاگرام ناموفق بود. لطفاً مجدداً تلاش کنید.")
+    raise Exception("دریافت رسانه اینستاگرام ناموفق بود. ممکن است پیج خصوصی باشد.")
 
 # ---------------------------------------------------------
-# بخش اسپاتیفای (شناسایی دقیق خواننده و آهنگ)
+# بخش اسپاتیفای
 # ---------------------------------------------------------
 def get_spotify_details_pure(url):
     clean_url = url.split('?')[0]
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'User-Agent': BROWSER_HEADERS['User-Agent'],
         'Accept-Language': 'en-US,en;q=0.9'
     }
     
@@ -227,18 +160,11 @@ def get_spotify_details_pure(url):
     except Exception:
         pass
 
-    try:
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
-            title = info.get('track') or info.get('title', title)
-            artist = info.get('artist') or info.get('uploader') or artist
-            thumbnail = thumbnail or info.get('thumbnail')
-    except Exception:
-        pass
-
     return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
 
+# ---------------------------------------------------------
+# پینترست و تیک‌تاک
+# ---------------------------------------------------------
 def download_pinterest_pure(url, target_dir):
     headers = BROWSER_HEADERS.copy()
     session = requests.Session()
@@ -428,7 +354,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "instagram.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود کامل تمام اسلایدها / ریلز", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
         await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -569,7 +495,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_image_doc = False
     
     try:
-        await edit_message_safe(query, "⚡️ <b>در حال دریافت اسلایدها...</b>")
+        await edit_message_safe(query, "⚡️ <b>در حال دانلود رسانه...</b>")
         
         if is_instagram:
             try:
