@@ -265,19 +265,16 @@ def download_instagram_pure(url, target_dir):
     clean_url = url.split('?')[0]
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://snapinsta.app/'
+        'Referer': 'https://cobalt.tools/'
     }
     
+    downloaded_files = []
+    res_title = "Instagram Media"
+    
+    # ۱. تلاش اول با Cobalt API (پشتیبانی کامل از ویدیو، ریلز و عکس‌های چندتایی/Carousel)
     try:
-        # استفاده از API پایدار برای دور زدن محدودیت‌های سخت اینستاگرام روی سرور
-        api_endpoints = [
-            f"https://api.cobalt.tools/api/json",
-            f"https://tikwm.com/api/?url={clean_url}"
-        ]
-        
-        # تلاش با Cobalt API
         payload = {"url": clean_url, "vQuality": "max"}
         cobalt_headers = {
             'Accept': 'application/json',
@@ -287,38 +284,80 @@ def download_instagram_pure(url, target_dir):
         res = session.post("https://api.cobalt.tools/api/json", json=payload, headers=cobalt_headers, timeout=15)
         if res.status_code == 200:
             data = res.json()
-            dl_url = data.get('url') or data.get('picker', [{}])[0].get('url')
-            if dl_url:
-                out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
-                v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
-                if v_res.status_code == 200:
-                    with open(out_path, 'wb') as f:
-                        for chunk in v_res.iter_content(chunk_size=8192):
-                            if chunk: f.write(chunk)
-                    return [out_path], "Instagram Media", False
-    except:
-        pass
-
-    # روش جایگزین با tikwm
-    try:
-        res = session.get(f"https://tikwm.com/api/?url={clean_url}", headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get('code') == 0:
-                item = data.get('data', {})
-                v_url = item.get('play') or item.get('url')
-                if v_url:
-                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
-                    v_res = session.get(v_url, headers=headers, stream=True)
+            status = data.get('status')
+            if status in ['stream', 'redirect']:
+                dl_url = data.get('url')
+                if dl_url:
+                    ext = '.mp4' if 'mp4' in dl_url.lower() or 'video' in dl_url.lower() else '.jpg'
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}{ext}")
+                    v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
                     if v_res.status_code == 200:
                         with open(out_path, 'wb') as f:
                             for chunk in v_res.iter_content(chunk_size=8192):
                                 if chunk: f.write(chunk)
-                        return [out_path], "Instagram Media", False
-    except:
-        pass
+                        downloaded_files.append(out_path)
+            elif status == 'picker':
+                picker = data.get('picker', [])
+                for idx, item in enumerate(picker):
+                    dl_url = item.get('url')
+                    if dl_url:
+                        ext = '.mp4' if 'mp4' in dl_url.lower() else '.jpg'
+                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx}{ext}")
+                        v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
+                        if v_res.status_code == 200:
+                            with open(out_path, 'wb') as f:
+                                for chunk in v_res.iter_content(chunk_size=8192):
+                                    if chunk: f.write(chunk)
+                            downloaded_files.append(out_path)
+    except Exception as e:
+        print(f"Cobalt API error: {e}")
 
-    raise Exception("امکان دانلود پست اینستاگرام فراهم نشد. لینک معتبر نیست یا سرور مسدود شده است.")
+    if downloaded_files:
+        return downloaded_files, res_title, False
+
+    # ۲. تلاش دوم با yt-dlp به عنوان پشتیبان قدرتمند اینستاگرام
+    try:
+        ydl_opts = {
+            'outtmpl': os.path.join(target_dir, 'ig_%(id)s_%(autonumber)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': False,
+            'http_headers': BROWSER_HEADERS,
+            'ignoreerrors': True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(clean_url, download=True)
+            if info:
+                res_title = info.get('title', 'Instagram Media')
+                if 'entries' in info:
+                    for entry in info['entries']:
+                        if entry:
+                            p = ydl.prepare_filename(entry)
+                            if os.path.exists(p):
+                                downloaded_files.append(p)
+                            else:
+                                base, _ = os.path.splitext(p)
+                                for ext in ['.mp4', '.jpg', '.jpeg', '.png', '.webp']:
+                                    if os.path.exists(base + ext):
+                                        downloaded_files.append(base + ext)
+                                        break
+                else:
+                    p = ydl.prepare_filename(info)
+                    if os.path.exists(p):
+                        downloaded_files.append(p)
+                    else:
+                        base, _ = os.path.splitext(p)
+                        for ext in ['.mp4', '.jpg', '.jpeg', '.png', '.webp']:
+                            if os.path.exists(base + ext):
+                                downloaded_files.append(base + ext)
+                                break
+    except Exception as e:
+        print(f"yt-dlp fallback error: {e}")
+
+    if downloaded_files:
+        return downloaded_files, res_title, False
+
+    raise Exception("امکان دانلود این پست اینستاگرام وجود ندارد (ممکن است عکس ثابت، پست خصوصی یا لینک نامعتبر باشد).")
 
 # ---------------------------------------------------------
 # هندلرهای تلگرام
