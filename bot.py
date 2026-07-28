@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import yt_dlp
 
 # ---------------------------------------------------------
-# توکن‌ها و تنظیمات
+# تنظیمات اولیه
 # ---------------------------------------------------------
 TOKEN = '8897975172:AAFXrND5_zFFeSsGDxD9lYdF32zwhTFtpds'
 
@@ -47,7 +47,6 @@ class ProgressFileWriter:
         self.close()
 
 def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
-    """جستجوی هوشمند برای پیدا کردن آخرین فایل دانلود شده در پوشه"""
     if not os.path.exists(target_dir):
         return None
     files = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if not f.endswith('.tmp') and not f.endswith('.part')]
@@ -271,7 +270,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
         "▫️ <b>Spotify & SoundCloud</b> (موزیک با کاور و تگ)\n"
         "▫️ <b>YouTube & YouTube Music</b> (کیفیت‌های مختلف + MP3)\n"
-        "▫️ <b>Instagram</b> (پست، ریلز و اسلایدی)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و آلبوم‌های عکس/ویدیو)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
         "▫️ <b>Pinterest & Reddit</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
@@ -361,7 +360,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "instagram.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز / آلبوم", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
         await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -466,8 +465,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     if is_instagram:
-        ydl_opts['format'] = 'best'
+        ydl_opts['format'] = 'bestvideo+bestaudio/best'
+        ydl_opts['writethumbnails'] = True
         ydl_opts['outtmpl'] = 'downloads/ig_%(id)s_%(autonumber)s.%(ext)s'
+        ydl_opts['allsubtitles'] = False
     
     is_audio = data == "fmt_audio" or data.startswith("spo_")
     
@@ -532,22 +533,46 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
         
         if not filename:
-            # ذخیره لیست فایل‌های قبلی موجود در پوشه
             files_before = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
 
-            # بررسی فایل‌های اضافه شده پس از دانلود
             files_after = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
             new_files = list(files_after - files_before)
 
-            if new_files:
-                # انتخاب جدیدترین فایل ایجاد شده
-                filename = os.path.join('downloads', new_files[0])
-            else:
-                # جستجوی هوشمند به عنوان پشتیبان (فایل‌های ۲ دقیقه اخیر)
-                filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
+            if is_instagram and new_files:
+                media_files = []
+                for f in new_files:
+                    full_path = os.path.join('downloads', f)
+                    _, ext = os.path.splitext(f.lower())
+                    if ext in ['.jpg', '.jpeg', '.png', '.webp', '.mp4']:
+                        media_files.append(full_path)
+                
+                if media_files:
+                    if len(media_files) > 1:
+                        media_group = []
+                        for f in media_files[:10]: # حداکثر ۱۰ رسانه در یک آلبوم تلگرام
+                            _, f_ext = os.path.splitext(f.lower())
+                            if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                media_group.append(InputMediaPhoto(open(f, 'rb')))
+                            elif f_ext in ['.mp4']:
+                                media_group.append(InputMediaVideo(open(f, 'rb')))
+                        
+                        await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
+                        
+                        for f in media_files:
+                            if os.path.exists(f): os.remove(f)
+                        await query.message.delete()
+                        return
+                    else:
+                        filename = media_files[0]
+
+            if not filename:
+                if new_files:
+                    filename = os.path.join('downloads', new_files[0])
+                else:
+                    filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
 
         if not filename or not os.path.exists(filename):
             raise Exception("فایل موردنظر دانلود نشد.")
@@ -617,7 +642,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with all bugs fixed!")
+    print("Bot is running successfully with Instagram album/photo support!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
