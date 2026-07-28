@@ -19,27 +19,6 @@ BROWSER_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 
-class ProgressFileWriter:
-    def __init__(self, filename, callback):
-        self.file = open(filename, 'rb')
-        self.total_size = os.path.getsize(filename)
-        self.callback = callback
-
-    def read(self, size=-1):
-        chunk = self.file.read(size)
-        if chunk:
-            self.callback(len(chunk), self.total_size)
-        return chunk
-
-    def close(self):
-        self.file.close()
-
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
 def get_spotify_details_pure(url):
     try:
         clean_url = url.split('?')[0]
@@ -80,7 +59,6 @@ def download_instagram_via_api(url, target_dir):
         'Referer': 'https://cobalt.tools/'
     }
     
-    # استفاده از API پایدار Cobalt برای جلوگیری از بلاک شدن توسط اینستاگرام
     try:
         payload = {"url": clean_url, "vQuality": "max"}
         cobalt_headers = {
@@ -92,6 +70,7 @@ def download_instagram_via_api(url, target_dir):
         if res.status_code == 200:
             data = res.json()
             status = data.get('status')
+            
             if status in ['stream', 'redirect']:
                 dl_url = data.get('url')
                 if dl_url:
@@ -102,14 +81,16 @@ def download_instagram_via_api(url, target_dir):
                         with open(out_path, 'wb') as f:
                             for chunk in v_res.iter_content(chunk_size=8192):
                                 if chunk: f.write(chunk)
-                        return [out_path], "Instagram Media", False
+                        return [out_path], "Instagram Media"
+                        
             elif status == 'picker':
                 picker = data.get('picker', [])
                 downloaded_files = []
                 for idx, item in enumerate(picker):
                     dl_url = item.get('url')
                     if dl_url:
-                        ext = '.mp4' if 'mp4' in dl_url.lower() else '.jpg'
+                        is_video = 'mp4' in dl_url.lower() or item.get('type') == 'video'
+                        ext = '.mp4' if is_video else '.jpg'
                         out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx}{ext}")
                         v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
                         if v_res.status_code == 200:
@@ -118,35 +99,11 @@ def download_instagram_via_api(url, target_dir):
                                     if chunk: f.write(chunk)
                             downloaded_files.append(out_path)
                 if downloaded_files:
-                    return downloaded_files, "Instagram Media", False
+                    return downloaded_files, "Instagram Media"
     except Exception as e:
         print(f"Cobalt API Error: {e}")
 
     raise Exception("اینستاگرام لینک را مسدود کرد یا پست در دسترس نیست.")
-
-def download_tiktok_pure(url, target_dir):
-    session = requests.Session()
-    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    headers = BROWSER_HEADERS.copy()
-    
-    res = session.get(api_url, headers=headers, timeout=15)
-    if res.status_code == 200:
-        data = res.json()
-        title = data.get('title', 'TikTok Media')
-        title = re.sub(r'[\\/*?:"<>|]', "", title)
-        
-        video_data = data.get('video', {})
-        v_url = video_data.get('noWatermark') or video_data.get('watermark')
-        if v_url:
-            out_path = os.path.join(target_dir, f"tt_{int(time.time())}.mp4")
-            v_res = session.get(v_url, headers=headers, stream=True)
-            if v_res.status_code == 200:
-                with open(out_path, 'wb') as f:
-                    for chunk in v_res.iter_content(chunk_size=8192):
-                        if chunk: f.write(chunk)
-                return out_path, title, False
-
-    raise Exception("دریافت ویدیو از تیک‌تاک ناموفق بود.")
 
 # ---------------------------------------------------------
 # هندلرهای تلگرام
@@ -154,7 +111,7 @@ def download_tiktok_pure(url, target_dir):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "💎 <b>سلام! ربات با کدهای اصلاح‌شده و کاملاً پایدار آماده است.</b>\n\n"
+        "💎 <b>سلام! ربات با قابلیت جدید دانلود پست‌های عکسی و ریلز آماده است.</b>\n\n"
         "🔗 لینک اسپاتیفای، اینستاگرام، یوتیوب یا تیک‌تاک خود را ارسال کنید:"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
@@ -277,7 +234,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_message_safe(query, "⚡️ در حال دانلود فایل...")
         
         if data == "fmt_instagram":
-            downloaded_files, res_title, _ = await main_loop.run_in_executor(
+            downloaded_files, res_title = await main_loop.run_in_executor(
                 None, lambda: download_instagram_via_api(url, 'downloads')
             )
         elif data.startswith("spo_"):
@@ -339,13 +296,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         res_title = download_info.get('title', 'Media')
 
         if not filename and downloaded_files:
-            filename = downloaded_files[0]
+            if len(downloaded_files) == 1:
+                filename = downloaded_files[0]
 
         if not filename and not downloaded_files:
             raise Exception("فایل یافت نشد.")
 
+        # اگر چند فایل (اسلایدر عکس یا آلبوم) دانلود شد به صورت گروهی ارسال کن
         if len(downloaded_files) > 1:
-            media_group = [InputMediaPhoto(open(f, 'rb')) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) else InputMediaVideo(open(f, 'rb')) for f in downloaded_files]
+            media_group = []
+            for f in downloaded_files:
+                if f.lower().endswith(('.mp4', '.mkv', '.mov')):
+                    media_group.append(InputMediaVideo(open(f, 'rb')))
+                else:
+                    media_group.append(InputMediaPhoto(open(f, 'rb')))
+            
             await context.bot.send_media_group(chat_id=chat_id, media=media_group)
             for f in downloaded_files:
                 if os.path.exists(f): os.remove(f)
