@@ -46,6 +46,18 @@ class ProgressFileWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
+    """جستجوی هوشمند برای پیدا کردن آخرین فایل دانلود شده در پوشه"""
+    if not os.path.exists(target_dir):
+        return None
+    files = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if not f.endswith('.tmp') and not f.endswith('.part')]
+    if not files:
+        return None
+    latest_file = max(files, key=os.path.getctime)
+    if time.time() - os.path.getctime(latest_file) <= max_age_seconds:
+        return latest_file
+    return None
+
 def get_spotify_details_pure(url):
     try:
         clean_url = url.split('?')[0]
@@ -299,7 +311,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "spotify.com" in url:
-        progress_msg = await update.message.reply_text("🔍 <b>در حال استکراج اطلاعات از اسپاتیفای...</b>", parse_mode="HTML")
+        progress_msg = await update.message.reply_text("🔍 <b>در حال استخراج اطلاعات از اسپاتیفای...</b>", parse_mode="HTML")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
         await progress_msg.delete()
         
@@ -315,7 +327,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🧡 دانلود از SoundCloud", callback_data="spo_sc")]
         ]
         
-        caption = f"🎵 <b>{title}</b>\n👤 <b>{artist}</b>\n\n✨ <b>مبع دانلود را انتخاب کنید:</b>"
+        caption = f"🎵 <b>{title}</b>\n👤 <b>{artist}</b>\n\n✨ <b>منبع دانلود را انتخاب کنید:</b>"
         if thumbnail:
             await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
@@ -491,7 +503,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         download_url = url
 
     filename = None
-    downloaded_files = []
     res_title = info.get('title', 'Media')
     is_image_doc = False
     
@@ -521,61 +532,27 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
         
         if not filename:
+            # ذخیره لیست فایل‌های قبلی موجود در پوشه
+            files_before = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
+            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                download_info = await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
-                
-                if download_info and 'entries' in download_info and download_info['entries']:
-                    for entry in download_info['entries']:
-                        if entry:
-                            f_path = ydl.prepare_filename(entry)
-                            if data.startswith("spo_"):
-                                f_path = os.path.splitext(f_path)[0] + ".mp3"
-                            if os.path.exists(f_path): downloaded_files.append(f_path)
-                            else:
-                                base, _ = os.path.splitext(f_path)
-                                for ext in ['.mp3', '.mp4', '.jpg', '.jpeg', '.png', '.webp', '.mkv']:
-                                    if os.path.exists(base + ext):
-                                        downloaded_files.append(base + ext)
-                                        break
-                else:
-                    active_info = download_info
-                    if active_info:
-                        filename = ydl.prepare_filename(active_info)
-                        if data.startswith("spo_"):
-                            filename = os.path.splitext(filename)[0] + ".mp3"
-                        if not data.startswith("spo_"):
-                            res_title = active_info.get('title', 'Media')
-                        
-                        if not os.path.exists(filename):
-                            base, _ = os.path.splitext(filename)
-                            for ext in ['.mp3', '.mp4', '.jpg', '.jpeg', '.png', '.webp', '.mkv']:
-                                if os.path.exists(base + ext):
-                                    filename = base + ext
-                                    break
+                await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
 
-        if not filename and downloaded_files:
-            filename = downloaded_files[0]
+            # بررسی فایل‌های اضافه شده پس از دانلود
+            files_after = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
+            new_files = list(files_after - files_before)
+
+            if new_files:
+                # انتخاب جدیدترین فایل ایجاد شده
+                filename = os.path.join('downloads', new_files[0])
+            else:
+                # جستجوی هوشمند به عنوان پشتیبان (فایل‌های ۲ دقیقه اخیر)
+                filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
 
         if not filename or not os.path.exists(filename):
             raise Exception("فایل موردنظر دانلود نشد.")
 
         chat_id = query.message.chat_id
-
-        if len(downloaded_files) > 1 and not is_audio:
-            media_group = []
-            for f in downloaded_files:
-                _, f_ext = os.path.splitext(f.lower())
-                if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                    media_group.append(InputMediaPhoto(open(f, 'rb')))
-                elif f_ext in ['.mp4', '.mkv']:
-                    media_group.append(InputMediaVideo(open(f, 'rb')))
-            
-            if media_group:
-                await context.bot.send_media_group(chat_id=chat_id, media=media_group)
-                for f in downloaded_files:
-                    if os.path.exists(f): os.remove(f)
-                await query.message.delete()
-                return
 
         last_upload_update = time.time()
         uploaded_bytes = 0
@@ -597,13 +574,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
             safe_title = str(res_title).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
-            if is_audio:
+            if is_audio or ext in ['.mp3', '.m4a', '.ogg', '.wav', '.flac']:
                 artist_name = str(info.get('artist', 'نامشخص')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 song_title = str(info.get('title', res_title)).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 caption_text = f"🎵 <b>{song_title}</b>\n👤 <b>خواننده:</b> {artist_name}"
                 await context.bot.send_audio(
                     chat_id=chat_id, audio=tracked_file, 
-                    filename=f"{song_title}.mp3",
+                    filename=os.path.basename(filename),
                     caption=caption_text, 
                     performer=artist_name, 
                     title=song_title,
@@ -621,20 +598,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     read_timeout=180, write_timeout=180, parse_mode="HTML"
                 )
         
-        if filename and os.path.exists(filename): os.remove(filename)
-        for f in downloaded_files:
-            if os.path.exists(f): os.remove(f)
+        if filename and os.path.exists(filename): 
+            os.remove(filename)
         await query.message.delete()
         
     except Exception as e:
-        if filename and os.path.exists(filename): os.remove(filename)
-        for f in downloaded_files:
-            if os.path.exists(f): os.remove(f)
+        if filename and os.path.exists(filename): 
+            os.remove(filename)
         clean_err = str(e).replace("ERROR:", "").strip()
         await query.message.reply_text(f"❌ <b>خطا در پردازش یا ارسال:</b>\n<code>{clean_err}</code>", parse_mode="HTML")
 
 def main():
-    if not os.path.exists('downloads'): os.makedirs('downloads')
+    if not os.path.exists('downloads'): 
+        os.makedirs('downloads')
     
     app = Application.builder().token(TOKEN).connect_timeout(180).read_timeout(180).write_timeout(180).pool_timeout(180).build()
     
