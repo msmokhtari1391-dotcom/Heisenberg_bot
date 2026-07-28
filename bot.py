@@ -260,6 +260,70 @@ def download_tiktok_pure(url, target_dir):
 
     raise Exception("دریافت ویدیو از تیک‌تاک ناموفق بود.")
 
+def download_instagram_pure(url, target_dir):
+    session = requests.Session()
+    clean_url = url.split('?')[0]
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+    }
+    
+    try:
+        # روش اول: استفاده از API های جایگزین سریع و پایدار برای اینستاگرام
+            api_url = f"https://tikwm.com/api/?url={clean_url}" # یا استفاده از استخراجگر عمومی
+            res = session.get(api_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get('code') == 0:
+                    item = data.get('data', {})
+                    # اگر ویدیو بود
+                    v_url = item.get('play') or item.get('url')
+                    if v_url:
+                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
+                        v_res = session.get(v_url, headers=headers, stream=True)
+                        if v_res.status_code == 200:
+                            with open(out_path, 'wb') as f:
+                                for chunk in v_res.iter_content(chunk_size=8192):
+                                    if chunk: f.write(chunk)
+                            return [out_path], "Instagram Media", False
+    except:
+        pass
+
+    # روش دوم و اصلی با Cobalt یا ابزارهای کمکی / yt-dlp ایمن شده با سشن اختصاصی
+    ydl_opts = {
+        'outtmpl': os.path.join(target_dir, 'ig_%(id)s_%(autonumber)s.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+    }
+    
+    downloaded_files = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(clean_url, download=True)
+        if info:
+            if 'entries' in info:
+                for entry in info['entries']:
+                    if entry:
+                        f_path = ydl.prepare_filename(entry)
+                        if os.path.exists(f_path):
+                            downloaded_files.append(f_path)
+            else:
+                f_path = ydl.prepare_filename(info)
+                if os.path.exists(f_path):
+                    downloaded_files.append(f_path)
+                    
+    if downloaded_files:
+        return downloaded_files, info.get('title', 'Instagram Media'), False
+
+    raise Exception("امکان دانلود پست اینستاگرام فراهم نشد. لینک معتبر نیست یا نیاز به لاگین دارد.")
+
 # ---------------------------------------------------------
 # هندلرهای تلگرام
 # ---------------------------------------------------------
@@ -477,11 +541,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'ignoreerrors': True
     }
     
-    if is_instagram:
-        ydl_opts['format'] = 'bestvideo+bestaudio/best'
-        ydl_opts['merge_output_format'] = 'mp4'
-        ydl_opts['outtmpl'] = 'downloads/ig_%(id)s_%(autonumber)s.%(ext)s'
-    
     is_audio = data == "fmt_audio" or data.startswith("spo_")
     
     if is_audio:
@@ -522,7 +581,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال اتصال به سرور و دانلود فایل اصلی...</b>")
         
-        if is_tiktok:
+        if is_instagram:
+            try:
+                downloaded_files, res_title, _ = await main_loop.run_in_executor(
+                    None, lambda: download_instagram_pure(download_url, 'downloads')
+                )
+            except Exception as ig_err:
+                raise Exception(f"خطای اینستاگرام: {str(ig_err)}")
+
+        if is_tiktok and not downloaded_files:
             try:
                 filename, res_title, is_image_doc = await main_loop.run_in_executor(
                     None, lambda: download_tiktok_pure(download_url, 'downloads')
@@ -530,7 +597,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 is_tiktok = False
 
-        if is_pinterest and not filename:
+        if is_pinterest and not filename and not downloaded_files:
             res_title = "Pinterest Media"
             try:
                 filename, is_image_doc = await main_loop.run_in_executor(
@@ -539,7 +606,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 is_pinterest = False
                 
-        elif is_reddit and not filename:
+        elif is_reddit and not filename and not downloaded_files:
             try:
                 filename, res_title, is_image_doc = await main_loop.run_in_executor(
                     None, lambda: download_reddit_via_json(download_url, 'downloads')
@@ -547,7 +614,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 is_reddit = False
         
-        if not is_pinterest and not is_tiktok and not filename:
+        if not is_pinterest and not is_tiktok and not is_instagram and not filename and not downloaded_files:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 download_info = await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
                 
@@ -581,9 +648,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     break
 
         if not filename and downloaded_files:
-            filename = downloaded_files[0]
+            if len(downloaded_files) == 1:
+                filename = downloaded_files[0]
 
-        if not filename or not os.path.exists(filename):
+        if not filename and not downloaded_files:
             raise Exception("فایل موردنظر در سرور منبع پیدا نشد یا دانلود نشد.")
 
         chat_id = query.message.chat_id
@@ -604,6 +672,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.delete()
                 return
 
+        if not filename and downloaded_files:
+            filename = downloaded_files[0]
+
         last_upload_update = time.time()
         uploaded_bytes = 0
 
@@ -622,8 +693,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, ext = os.path.splitext(filename.lower())
         
         with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
-            
-            # اصلاح ایمن کاراکترها برای جلوگیری از ارور HTML تلگرام
             safe_title = str(res_title).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             
             if is_audio:
@@ -670,7 +739,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with fixed Telegram HTML parsing...")
+    print("Bot is running successfully with fixed Instagram downloader...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
