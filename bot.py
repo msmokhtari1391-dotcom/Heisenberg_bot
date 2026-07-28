@@ -20,33 +20,6 @@ BROWSER_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 
-class ProgressFileWriter:
-    def __init__(self, filename, callback):
-        self.file = open(filename, 'rb')
-        self.total_size = os.path.getsize(filename)
-        self.callback = callback
-
-    def read(self, size=-1):
-        chunk = self.file.read(size)
-        if chunk:
-            try:
-                self.callback(len(chunk), self.total_size)
-            except Exception:
-                pass
-        return chunk
-
-    def close(self):
-        try:
-            self.file.close()
-        except:
-            pass
-
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-
 def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     if not os.path.exists(target_dir):
         return None
@@ -59,7 +32,7 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 # ---------------------------------------------------------
-# بخش اینستاگرام (مقاوم در برابر بن IP با چرخنده API)
+# بخش اینستاگرام (چرخشی و کاملاً بدون کوکی)
 # ---------------------------------------------------------
 def download_instagram_pure(url, target_dir):
     clean_url = url.split('?')[0].rstrip('/')
@@ -68,7 +41,7 @@ def download_instagram_pure(url, target_dir):
     
     downloaded_paths = []
 
-    # API 1: Cobalt Engine (نمونه‌های متعدد)
+    # 1. تست از طریق سرورهای مختلف Cobalt
     cobalt_instances = [
         "https://api.cobalt.tools/",
         "https://cobalt-api.kwiatekm.tokyo/",
@@ -110,7 +83,7 @@ def download_instagram_pure(url, target_dir):
         except Exception:
             continue
 
-    # API 2: TikWM Backup API
+    # 2. API پشتیبان TikWM
     try:
         backup_api = f"https://api.v2.tikwm.com/api/?url={clean_url}"
         res = session.get(backup_api, timeout=10).json()
@@ -137,7 +110,7 @@ def download_instagram_pure(url, target_dir):
     except Exception:
         pass
 
-    # API 3: DDInstagram Direct Proxy
+    # 3. پروکسی DDInstagram
     try:
         dd_url = clean_url.replace("instagram.com", "ddinstagram.com")
         r = session.get(dd_url, timeout=10)
@@ -158,10 +131,10 @@ def download_instagram_pure(url, target_dir):
     except Exception:
         pass
 
-    raise Exception("اینستاگرام اجازه دریافت این پست را نداد (پست خصوصی است یا لینک معتبر نیست).")
+    raise Exception("دریافت اینستاگرام ناموفق بود. احتمالاً پست خصوصی است یا لینک اشتباه است.")
 
 # ---------------------------------------------------------
-# بخش اسپاتیفای
+# اسپاتیفای، پینترست و تیک‌تاک
 # ---------------------------------------------------------
 def get_spotify_details_pure(url):
     clean_url = url.split('?')[0]
@@ -191,9 +164,6 @@ def get_spotify_details_pure(url):
 
     return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
 
-# ---------------------------------------------------------
-# پینترست و تیک‌تاک
-# ---------------------------------------------------------
 def download_pinterest_pure(url, target_dir):
     headers = BROWSER_HEADERS.copy()
     session = requests.Session()
@@ -249,7 +219,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
         "▫️ <b>Spotify & SoundCloud</b>\n"
         "▫️ <b>YouTube & YouTube Music</b>\n"
-        "▫️ <b>Instagram</b> (پست، ریلز و کاروسل)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و آلبوم)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
         "▫️ <b>Pinterest</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
