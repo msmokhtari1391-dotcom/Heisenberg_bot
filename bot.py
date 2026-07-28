@@ -59,10 +59,9 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 # ---------------------------------------------------------
-# اصلاح بخش اینستاگرام (عکس، کاروسل و ریلز)
+# بخش اینستاگرام (عکس، کاروسل و ریلز)
 # ---------------------------------------------------------
 def download_instagram_pure(url, target_dir):
-    """دانلود مطمئن پست‌های چندتایی، ریلز و عکس‌های تک/چندتایی اینستاگرام"""
     clean_url = url.split('?')[0].rstrip('/')
     session = requests.Session()
     
@@ -87,7 +86,6 @@ def download_instagram_pure(url, target_dir):
     
     downloaded_paths = []
     
-    # روش اول: Cobalt Engine
     for endpoint in api_endpoints:
         try:
             res = session.post(endpoint, json=payload, headers=headers, timeout=10)
@@ -95,10 +93,8 @@ def download_instagram_pure(url, target_dir):
                 data = res.json()
                 status = data.get("status")
                 
-                # تک عکس یا تک ویدیو
                 if status in ["redirect", "tunnel"]:
                     media_url = data.get("url")
-                    # تشخیص واقعی نوع فایل بر اساس محتوا یا URL
                     ext = ".jpg"
                     if ".mp4" in media_url or "video" in media_url.lower():
                         ext = ".mp4"
@@ -116,7 +112,6 @@ def download_instagram_pure(url, target_dir):
                             for chunk in r.iter_content(8192): f.write(chunk)
                         return [out_path]
 
-                # کاروسل / اسلایدهای چندتایی
                 elif status == "picker":
                     picker_items = data.get("picker", [])
                     for idx, item in enumerate(picker_items):
@@ -137,13 +132,11 @@ def download_instagram_pure(url, target_dir):
         except Exception:
             continue
 
-    # روش دوم: API رزرو اختصاصی (برای ریلزها و پست‌های عکسی)
     try:
         backup_api = f"https://api.v2.tikwm.com/api/?url={clean_url}"
         res = session.get(backup_api, timeout=10).json()
         if res.get("data"):
             data = res["data"]
-            # اگر اسلاید عکس چندتایی بود
             if "images" in data and data["images"]:
                 for idx, img_u in enumerate(data["images"]):
                     out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}.jpg")
@@ -154,7 +147,6 @@ def download_instagram_pure(url, target_dir):
                 if downloaded_paths:
                     return downloaded_paths
 
-            # اگر تک ویدیو / ریلز بود
             v_url = data.get("play") or data.get("wmplay")
             if v_url:
                 out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
@@ -168,7 +160,7 @@ def download_instagram_pure(url, target_dir):
     raise Exception("دریافت رسانه اینستاگرام ناموفق بود. لطفاً مجدداً تلاش کنید.")
 
 # ---------------------------------------------------------
-# اصلاح بخش اسپاتیفای (شناسایی دقیق خواننده و آهنگ)
+# بخش اسپاتیفای (شناسایی دقیق خواننده و آهنگ)
 # ---------------------------------------------------------
 def get_spotify_details_pure(url):
     clean_url = url.split('?')[0]
@@ -181,23 +173,19 @@ def get_spotify_details_pure(url):
     artist = "نامشخص"
     thumbnail = None
 
-    # روش اول: HTML Scraping مستقیم از صفحه اسپاتیفای (بسیار دقیق برای نام خواننده)
     try:
         res = requests.get(clean_url, headers=headers, timeout=10)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # استخراج عنوان
             og_title = soup.find('meta', property='og:title')
             if og_title and og_title.get('content'):
                 title = og_title['content']
                 
-            # استخراج تصویر
             og_img = soup.find('meta', property='og:image')
             if og_img and og_img.get('content'):
                 thumbnail = og_img['content']
 
-            # استخراج اسم خواننده از meta tagهای اختصاصی اسپاتیفای
             meta_artist = soup.find('meta', property='music:musician') or soup.find('meta', name='twitter:audio:artist_name')
             if meta_artist and meta_artist.get('content'):
                 artist = meta_artist['content']
@@ -205,7 +193,6 @@ def get_spotify_details_pure(url):
                 og_desc = soup.find('meta', property='og:description')
                 if og_desc and og_desc.get('content'):
                     desc = og_desc['content']
-                    # اسپاتیفای معمولاً می‌نویسد: "Listen to Song on Spotify. Artist · Song · Year"
                     if "·" in desc:
                         parts = desc.split("·")
                         artist = parts[0].replace("Listen to", "").strip()
@@ -217,7 +204,6 @@ def get_spotify_details_pure(url):
     except Exception:
         pass
 
-    # روش دوم: oEmbed Fallback
     try:
         oembed_url = f"https://open.spotify.com/oembed?url={clean_url}"
         res = requests.get(oembed_url, headers=headers, timeout=8)
@@ -241,7 +227,6 @@ def get_spotify_details_pure(url):
     except Exception:
         pass
 
-    # روش سوم: yt-dlp
     try:
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -253,75 +238,6 @@ def get_spotify_details_pure(url):
         pass
 
     return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
-
-def clean_reddit_url(url):
-    url = url.split('?')[0]
-    url = re.sub(r'https://(www\.)?reddit\.com', 'https://old.reddit.com', url)
-    url = re.sub(r'https://r\.reddit\.com', 'https://old.reddit.com', url)
-    return url
-
-def download_reddit_via_json(url, target_dir):
-    try:
-        session = requests.Session()
-        res = session.head(url, allow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'})
-        final_url = res.url
-    except:
-        final_url = url
-
-    base_url = clean_reddit_url(final_url)
-    clean_url = base_url.rstrip('/') + '.json'
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Cookie': 'over18=1'
-    }
-    
-    res = requests.get(clean_url, headers=headers, timeout=15, allow_redirects=True)
-    if res.status_code != 200:
-        raise Exception(f"ردیت دسترسی را مسدود کرد (Status: {res.status_code})")
-        
-    data = res.json()
-    if not isinstance(data, list) or not data:
-        raise Exception("ساختار دیتای ردیت نامعتبر است.")
-        
-    post_data = data[0]['data']['children'][0]['data']
-    title = re.sub(r'[\\/*?:"<>|]', "", post_data.get('title', 'Reddit_Media'))
-    
-    media_data = post_data.get('secure_media') or post_data.get('media')
-    if media_data and media_data.get('reddit_video'):
-        video_url = media_data['reddit_video'].get('fallback_url')
-        if video_url:
-            video_url = video_url.split('?')[0]
-            audio_url = re.sub(r'DASH_\d+\.mp4', 'DASH_AUDIO_128.mp4', video_url)
-            v_path = os.path.join(target_dir, f"v_{int(time.time())}.mp4")
-            a_path = os.path.join(target_dir, f"a_{int(time.time())}.mp4")
-            out_path = os.path.join(target_dir, f"{title}.mp4")
-            
-            v_res = requests.get(video_url, headers=headers)
-            with open(v_path, 'wb') as f: f.write(v_res.content)
-            a_res = requests.get(audio_url, headers=headers)
-            
-            if a_res.status_code == 200:
-                with open(a_path, 'wb') as f: f.write(a_res.content)
-                os.system(f'ffmpeg -y -i "{v_path}" -i "{a_path}" -c:v copy -c:a aac "{out_path}" > /dev/null 2>&1')
-                if os.path.exists(v_path): os.remove(v_path)
-                if os.path.exists(a_path): os.remove(a_path)
-            else:
-                if os.path.exists(v_path): os.rename(v_path, out_path)
-            return out_path, title, False
-
-    if post_data.get('url'):
-        url_lower = post_data['url'].lower()
-        if any(url_lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
-            img_url = post_data['url']
-            _, ext = os.path.splitext(img_url.split('?')[0])
-            out_path = os.path.join(target_dir, f"{title}{ext}")
-            img_res = requests.get(img_url, headers=headers)
-            with open(out_path, 'wb') as f: f.write(img_res.content)
-            return out_path, title, True
-        
-    raise Exception("این پست رسانه مستقیمی برای دانلود ندارد.")
 
 def download_pinterest_pure(url, target_dir):
     headers = BROWSER_HEADERS.copy()
@@ -431,7 +347,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "▫️ <b>YouTube & YouTube Music</b>\n"
         "▫️ <b>Instagram</b> (پست، ریلز و تمام اسلایدهای کاروسل)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
-        "▫️ <b>Pinterest & Reddit</b>\n\n"
+        "▫️ <b>Pinterest</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
@@ -459,13 +375,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'TikTok Media', 'is_audio_only': False}
         await update.message.reply_text("🎵 <b>تیک‌تاک شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        return
-
-    if "reddit.com" in url or "r.reddit.com" in url:
-        context.user_data['url'] = url
-        context.user_data['info'] = {'title': 'Reddit Post', 'is_audio_only': False}
-        keyboard = [[InlineKeyboardButton("⚡️ استخراج مستقیم رسانه", callback_data="fmt_best")]]
-        await update.message.reply_text("📌 <b>ردیت شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     if "spotify.com" in url:
@@ -608,7 +517,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status_text = f"📥 <b>در حال دانلود...</b>\n\n{bar} <code>{percent:.1f}%</code> \n🚀 <b>سرعت:</b> <code>{speed_mb:.2f} MB/s</code>"
                 asyncio.run_coroutine_threadsafe(edit_message_safe(query, status_text), main_loop)
 
-    is_reddit = "reddit.com" in url or "r.reddit.com" in url
     is_pinterest = "pinterest" in url or "pin.it" in url
     is_instagram = "instagram.com" in url
     is_tiktok = "tiktok.com" in url or "vm.tiktok.com" in url
@@ -663,7 +571,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال دریافت اسلایدها...</b>")
         
-        # پردازش اختصاصی اینستاگرام
         if is_instagram:
             try:
                 ig_files = await main_loop.run_in_executor(
@@ -671,11 +578,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if ig_files:
                     ig_files.sort()
-                    # اگر فقط ۱ فایل بود مستقیماً ارسال بشه
                     if len(ig_files) == 1:
                         filename = ig_files[0]
                     else:
-                        # اگر چند اسلاید بود گروهی ارسال بشه
                         for i in range(0, len(ig_files), 10):
                             chunk_files = ig_files[i:i + 10]
                             media_group = []
@@ -709,13 +614,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     None, lambda: download_pinterest_pure(download_url, 'downloads')
                 )
                 res_title = "Pinterest Media"
-            except: pass
-                
-        elif is_reddit and not filename:
-            try:
-                filename, res_title, is_image_doc = await main_loop.run_in_executor(
-                    None, lambda: download_reddit_via_json(download_url, 'downloads')
-                )
             except: pass
         
         if not filename:
