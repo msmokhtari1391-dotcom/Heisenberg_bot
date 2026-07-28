@@ -58,29 +58,79 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 def download_instagram_pure(url, target_dir):
-    """استخراج مستقیم و هوشمند عکس‌ها و ویدیوهای اینستاگرام"""
+    """استخراج کامل تمام اسلایدهای عکس/ویدیوی اینستاگرام"""
     clean_url = url.split('?')[0].rstrip('/')
     session = requests.Session()
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
     }
-    
-    # روش اول: استفاده از سرویس کمکی API
-    api_url = f"https://api.vkrdown.com/insta/?url={clean_url}"
+
+    downloaded_paths = []
+
+    # روش اول: استفاده از GraphQL / JSON API اینستاگرام
     try:
-        res = session.get(api_url, timeout=10)
+        json_url = f"{clean_url}/?__a=1&__d=dis"
+        res = session.get(json_url, headers=headers, timeout=10)
+        
+        if res.status_code == 200 and 'graphql' in res.text:
+            data = res.json()
+            items = []
+            
+            # بررسی کاروسل (پست‌های چند اسلایدی)
+            media_data = data.get('graphql', {}).get('shortcode_media', {})
+            edges = media_data.get('edge_sidecar_to_children', {}).get('edges', [])
+            
+            if edges:
+                for edge in edges:
+                    node = edge.get('node', {})
+                    if node.get('is_video'):
+                        items.append({'url': node.get('video_url'), 'type': 'video'})
+                    else:
+                        items.append({'url': node.get('display_url'), 'type': 'image'})
+            else:
+                # تک عکس یا تک ویدیو
+                if media_data.get('is_video'):
+                    items.append({'url': media_data.get('video_url'), 'type': 'video'})
+                elif media_data.get('display_url'):
+                    items.append({'url': media_data.get('display_url'), 'type': 'image'})
+
+            for idx, item in enumerate(items):
+                m_url = item['url']
+                ext = '.mp4' if item['type'] == 'video' else '.jpg'
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx}{ext}")
+                
+                m_res = session.get(m_url, stream=True, timeout=15)
+                if m_res.status_code == 200:
+                    with open(out_path, 'wb') as f:
+                        for chunk in m_res.iter_content(chunk_size=8192):
+                            if chunk: f.write(chunk)
+                    downloaded_paths.append(out_path)
+
+            if downloaded_paths:
+                return downloaded_paths
+    except Exception:
+        pass
+
+    # روش دوم: API جایگزین مخصوص پست‌های اسلایدی
+    try:
+        api_url = f"https://api.vkrdown.com/insta/?url={clean_url}"
+        res = session.get(api_url, headers=headers, timeout=10)
+        
         if res.status_code == 200:
             data = res.json()
             media_list = data.get('data', []) or data.get('downloads', [])
-            downloaded_paths = []
             
             for idx, item in enumerate(media_list):
                 m_url = item.get('url') or item.get('download_url')
-                if m_url:
+                # فیلتر کردن آواتارها و عکس‌های پروفایل کوچیک
+                if m_url and 's150x150' not in m_url and 's320x320' not in m_url:
                     is_video = item.get('type') == 'video' or '.mp4' in m_url
                     ext = '.mp4' if is_video else '.jpg'
                     out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx}{ext}")
+                    
                     m_res = session.get(m_url, stream=True, timeout=15)
                     if m_res.status_code == 200:
                         with open(out_path, 'wb') as f:
@@ -93,21 +143,15 @@ def download_instagram_pure(url, target_dir):
     except Exception:
         pass
 
-    # روش دوم: استخراج مستقیم HTML در صورت ناموفق بودن API
+    # روش سوم: اسکرپ متا تگ‌های اصلی کیفیت بالا
     try:
-        embed_url = f"{clean_url}/embed/captioned/"
-        res = session.get(embed_url, headers=headers, timeout=12)
+        res = session.get(clean_url, headers=headers, timeout=12)
         if res.status_code == 200:
-            html = res.text
-            # پیدا کردن عکس‌ها
-            img_matches = re.findall(r'class="EmbeddedMediaImage"\s+src="([^"]+)"', html) or \
-                          re.findall(r'FFIMAGE.*?src="([^"]+)"', html) or \
-                          re.findall(r'https://scontent[^"]+\.jpg[^"]*', html)
-            
-            if img_matches:
-                img_url = img_matches[0].replace('&amp;', '&')
-                out_path = os.path.join(target_dir, f"ig_{int(time.time())}.jpg")
-                img_res = session.get(img_url, timeout=15)
+            og_images = re.findall(r'<meta property="og:image" content="([^"]+)"', res.text)
+            if og_images:
+                main_img = og_images[0].replace('&amp;', '&')
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_0.jpg")
+                img_res = session.get(main_img, timeout=15)
                 if img_res.status_code == 200:
                     with open(out_path, 'wb') as f:
                         f.write(img_res.content)
@@ -115,7 +159,7 @@ def download_instagram_pure(url, target_dir):
     except Exception:
         pass
 
-    raise Exception("امکان استخراج عکس/ویدیوی اینستاگرام وجود نداشت.")
+    raise Exception("امکان دریافت اسلایدهای این پست وجود نداشت.")
 
 def get_spotify_details_pure(url):
     try:
@@ -564,7 +608,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال اتصال به سرور...</b>")
         
-        # استخراج اختصاصی اینستاگرام (برای دور زدن خطای yt-dlp روی عکس‌ها)
+        # استخراج اختصاصی اینستاگرام (مدیریت کامل اسلایدهای کاروسل)
         if is_instagram:
             try:
                 ig_files = await main_loop.run_in_executor(
@@ -695,7 +739,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running with full Instagram photo/video bypass!")
+    print("Bot is running with full Instagram carousel support!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
