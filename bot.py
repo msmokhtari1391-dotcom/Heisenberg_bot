@@ -4,6 +4,7 @@ import re
 import time
 import json
 import requests
+from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
@@ -57,14 +58,18 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
         return latest_file
     return None
 
+# ---------------------------------------------------------
+# اصلاح بخش اینستاگرام (عکس، کاروسل و ریلز)
+# ---------------------------------------------------------
 def download_instagram_pure(url, target_dir):
-    """دانلود مطمئن و مستقیم اسلایدها و ریلز اینستاگرام بدون نیاز به yt-dlp"""
+    """دانلود مطمئن پست‌های چندتایی، ریلز و عکس‌های تک/چندتایی اینستاگرام"""
     clean_url = url.split('?')[0].rstrip('/')
     session = requests.Session()
     
     api_endpoints = [
         "https://api.cobalt.tools/",
         "https://cobalt-api.kwiatekm.tokyo/",
+        "https://co.wuk.sh/",
         "https://cobalt.q1.i.ng/"
     ]
     
@@ -82,27 +87,36 @@ def download_instagram_pure(url, target_dir):
     
     downloaded_paths = []
     
-    # متد اصلی: موتور Cobalt
+    # روش اول: Cobalt Engine
     for endpoint in api_endpoints:
         try:
-            res = session.post(endpoint, json=payload, headers=headers, timeout=12)
+            res = session.post(endpoint, json=payload, headers=headers, timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 status = data.get("status")
                 
-                # حالت اول: تک ویدیو یا تک عکس
+                # تک عکس یا تک ویدیو
                 if status in ["redirect", "tunnel"]:
                     media_url = data.get("url")
-                    ext = ".mp4" if "video" in res.text or ".mp4" in media_url else ".jpg"
+                    # تشخیص واقعی نوع فایل بر اساس محتوا یا URL
+                    ext = ".jpg"
+                    if ".mp4" in media_url or "video" in media_url.lower():
+                        ext = ".mp4"
+                        
                     out_path = os.path.join(target_dir, f"ig_{int(time.time())}_00{ext}")
-                    
-                    r = session.get(media_url, stream=True, timeout=15)
+                    r = session.get(media_url, stream=True, timeout=20)
                     if r.status_code == 200:
+                        ct = r.headers.get('content-type', '')
+                        if 'video' in ct and not out_path.endswith('.mp4'):
+                            out_path = out_path.replace('.jpg', '.mp4')
+                        elif 'image' in ct and not out_path.endswith('.jpg'):
+                            out_path = out_path.replace('.mp4', '.jpg')
+
                         with open(out_path, 'wb') as f:
                             for chunk in r.iter_content(8192): f.write(chunk)
                         return [out_path]
 
-                # حالت دوم: کاروسل / چند اسلاید (Picker)
+                # کاروسل / اسلایدهای چندتایی
                 elif status == "picker":
                     picker_items = data.get("picker", [])
                     for idx, item in enumerate(picker_items):
@@ -111,7 +125,7 @@ def download_instagram_pure(url, target_dir):
                         ext = ".mp4" if m_type == "video" else ".jpg"
                         out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}{ext}")
                         
-                        r = session.get(media_url, stream=True, timeout=15)
+                        r = session.get(media_url, stream=True, timeout=20)
                         if r.status_code == 200:
                             with open(out_path, 'wb') as f:
                                 for chunk in r.iter_content(8192): f.write(chunk)
@@ -123,36 +137,94 @@ def download_instagram_pure(url, target_dir):
         except Exception:
             continue
 
-    # متد رزرو (Backup API)
+    # روش دوم: API رزرو اختصاصی (برای ریلزها و پست‌های عکسی)
     try:
-        backup_url = f"https://v3.tikwm.com/api/?url={clean_url}"
-        res = session.get(backup_url, timeout=10).json()
-        if res.get("data", {}).get("play"):
-            v_url = res["data"]["play"]
-            out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
-            r = session.get(v_url, stream=True, timeout=15)
-            with open(out_path, 'wb') as f:
-                for chunk in r.iter_content(8192): f.write(chunk)
-            return [out_path]
+        backup_api = f"https://api.v2.tikwm.com/api/?url={clean_url}"
+        res = session.get(backup_api, timeout=10).json()
+        if res.get("data"):
+            data = res["data"]
+            # اگر اسلاید عکس چندتایی بود
+            if "images" in data and data["images"]:
+                for idx, img_u in enumerate(data["images"]):
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}.jpg")
+                    r = session.get(img_u, timeout=15)
+                    if r.status_code == 200:
+                        with open(out_path, 'wb') as f: f.write(r.content)
+                        downloaded_paths.append(out_path)
+                if downloaded_paths:
+                    return downloaded_paths
+
+            # اگر تک ویدیو / ریلز بود
+            v_url = data.get("play") or data.get("wmplay")
+            if v_url:
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
+                r = session.get(v_url, stream=True, timeout=15)
+                with open(out_path, 'wb') as f:
+                    for chunk in r.iter_content(8192): f.write(chunk)
+                return [out_path]
     except Exception:
         pass
 
-    raise Exception("دریافت اسلایدها ناموفق بود. مجدداً تلاش کنید.")
+    raise Exception("دریافت رسانه اینستاگرام ناموفق بود. لطفاً مجدداً تلاش کنید.")
 
+# ---------------------------------------------------------
+# اصلاح بخش اسپاتیفای (شناسایی دقیق خواننده و آهنگ)
+# ---------------------------------------------------------
 def get_spotify_details_pure(url):
+    clean_url = url.split('?')[0]
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    
+    title = "Track"
+    artist = "نامشخص"
+    thumbnail = None
+
+    # روش اول: HTML Scraping مستقیم از صفحه اسپاتیفای (بسیار دقیق برای نام خواننده)
     try:
-        clean_url = url.split('?')[0]
+        res = requests.get(clean_url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # استخراج عنوان
+            og_title = soup.find('meta', property='og:title')
+            if og_title and og_title.get('content'):
+                title = og_title['content']
+                
+            # استخراج تصویر
+            og_img = soup.find('meta', property='og:image')
+            if og_img and og_img.get('content'):
+                thumbnail = og_img['content']
+
+            # استخراج اسم خواننده از meta tagهای اختصاصی اسپاتیفای
+            meta_artist = soup.find('meta', property='music:musician') or soup.find('meta', name='twitter:audio:artist_name')
+            if meta_artist and meta_artist.get('content'):
+                artist = meta_artist['content']
+            else:
+                og_desc = soup.find('meta', property='og:description')
+                if og_desc and og_desc.get('content'):
+                    desc = og_desc['content']
+                    # اسپاتیفای معمولاً می‌نویسد: "Listen to Song on Spotify. Artist · Song · Year"
+                    if "·" in desc:
+                        parts = desc.split("·")
+                        artist = parts[0].replace("Listen to", "").strip()
+                    elif "Song ·" in desc:
+                        artist = desc.split("Song ·")[1].split("·")[0].strip()
+                        
+            if artist != "نامشخص" and title != "Track":
+                return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
+    except Exception:
+        pass
+
+    # روش دوم: oEmbed Fallback
+    try:
         oembed_url = f"https://open.spotify.com/oembed?url={clean_url}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        
-        res = requests.get(oembed_url, headers=headers, timeout=10)
+        res = requests.get(oembed_url, headers=headers, timeout=8)
         if res.status_code == 200:
             data = res.json()
             title_full = data.get('title', '')
-            thumbnail = data.get('thumbnail_url')
-            
-            artist = "نامشخص"
-            title = title_full
+            thumbnail = thumbnail or data.get('thumbnail_url')
             
             if " by " in title_full:
                 parts = title_full.rsplit(" by ", 1)
@@ -162,19 +234,25 @@ def get_spotify_details_pure(url):
                 parts = title_full.split(" - ", 1)
                 artist = parts[0].strip()
                 title = parts[1].strip()
-                
-            return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
+            else:
+                title = title_full
 
+            return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
+    except Exception:
+        pass
+
+    # روش سوم: yt-dlp
+    try:
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
-            title = info.get('track') or info.get('title', 'Track')
-            artist = info.get('artist') or info.get('uploader') or "نامشخص"
-            thumbnail = info.get('thumbnail')
-
-        return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
+            title = info.get('track') or info.get('title', title)
+            artist = info.get('artist') or info.get('uploader') or artist
+            thumbnail = thumbnail or info.get('thumbnail')
     except Exception:
-        return {'title': 'Track', 'artist': 'نامشخص', 'thumbnail': None}
+        pass
+
+    return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
 
 def clean_reddit_url(url):
     url = url.split('?')[0]
@@ -407,7 +485,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🧡 دانلود از SoundCloud", callback_data="spo_sc")]
         ]
         
-        caption = f"🎵 <b>{title}</b>\n👤 <b>{artist}</b>\n\n✨ <b>منبع دانلود را انتخاب کنید:</b>"
+        caption = f"🎵 <b>{title}</b>\n👤 <b>خواننده: {artist}</b>\n\n✨ <b>منبع دانلود را انتخاب کنید:</b>"
         if thumbnail:
             await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
@@ -593,23 +671,28 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if ig_files:
                     ig_files.sort()
-                    for i in range(0, len(ig_files), 10):
-                        chunk_files = ig_files[i:i + 10]
-                        media_group = []
-                        for f in chunk_files:
-                            _, f_ext = os.path.splitext(f.lower())
-                            if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                                media_group.append(InputMediaPhoto(open(f, 'rb')))
-                            elif f_ext in ['.mp4']:
-                                media_group.append(InputMediaVideo(open(f, 'rb')))
+                    # اگر فقط ۱ فایل بود مستقیماً ارسال بشه
+                    if len(ig_files) == 1:
+                        filename = ig_files[0]
+                    else:
+                        # اگر چند اسلاید بود گروهی ارسال بشه
+                        for i in range(0, len(ig_files), 10):
+                            chunk_files = ig_files[i:i + 10]
+                            media_group = []
+                            for f in chunk_files:
+                                _, f_ext = os.path.splitext(f.lower())
+                                if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                    media_group.append(InputMediaPhoto(open(f, 'rb')))
+                                elif f_ext in ['.mp4']:
+                                    media_group.append(InputMediaVideo(open(f, 'rb')))
+                            
+                            if media_group:
+                                await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
                         
-                        if media_group:
-                            await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
-                    
-                    for f in ig_files:
-                        if os.path.exists(f): os.remove(f)
-                    await query.message.delete()
-                    return
+                        for f in ig_files:
+                            if os.path.exists(f): os.remove(f)
+                        await query.message.delete()
+                        return
             except Exception as e:
                 raise Exception(str(e))
 
