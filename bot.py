@@ -3,7 +3,6 @@ import asyncio
 import re
 import time
 import json
-import urllib.request
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -42,54 +41,46 @@ class ProgressFileWriter:
         self.close()
 
 def get_spotify_details_pure(url):
+    """ استخراج دقیق متادیتای اسپاتیفای بدون نیاز به API Key """
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'application/json'
-        }
+        # پاکسازی لینک اسپاتیفای از پارامترهای اضافی
+        clean_url = url.split('?')[0]
+        oembed_url = f"https://open.spotify.com/oembed?url={clean_url}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        oembed_url = f"https://open.spotify.com/oembed?url={url}"
         res = requests.get(oembed_url, headers=headers, timeout=10)
         if res.status_code == 200:
             data = res.json()
             title_full = data.get('title', '')
             thumbnail = data.get('thumbnail_url')
             
-            artist = "مشخص نیست"
+            artist = "نامشخص"
             title = title_full
             
+            # تفکیک دقیق نام خواننده و آهنگ از ساختار oEmbed اسپاتیفای
             if " by " in title_full:
-                parts = title_full.split(" by ")
+                parts = title_full.rsplit(" by ", 1)
                 title = parts[0].strip()
-                artist = parts[1].split(" | ")[0].split(" - ")[0].strip()
-            elif " · " in title_full:
-                parts = title_full.split(" · ")
-                title = parts[0].strip()
-                if len(parts) > 1:
-                    artist = parts[1].strip()
+                artist = parts[1].strip()
             elif " - " in title_full:
                 parts = title_full.split(" - ", 1)
                 artist = parts[0].strip()
                 title = parts[1].strip()
                 
-            return {'title': title, 'artist': artist, 'year': '', 'thumbnail': thumbnail}
+            return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
 
+        # متد پشتیبان با yt_dlp
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'Track')
-            artist = info.get('uploader') or info.get('artist') or "مشخص نیست"
+            info = ydl.extract_info(clean_url, download=False)
+            title = info.get('track') or info.get('title', 'Track')
+            artist = info.get('artist') or info.get('uploader') or "نامشخص"
             thumbnail = info.get('thumbnail')
-            
-            if " - " in title and artist == "مشخص نیست":
-                parts = title.rsplit(" - ", 1)
-                artist = parts[0].strip()
-                title = parts[1].strip()
 
-        return {'title': title, 'artist': artist, 'year': '', 'thumbnail': thumbnail}
+        return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
     except Exception as e:
-        print(f"Error getting spotify details: {e}")
-        return {'title': 'Track', 'artist': 'مشخص نیست', 'year': '', 'thumbnail': None}
+        print(f"Error extracting Spotify details: {e}")
+        return {'title': 'Track', 'artist': 'نامشخص', 'thumbnail': None}
 
 def clean_reddit_url(url):
     url = url.split('?')[0]
@@ -109,7 +100,7 @@ def download_reddit_via_json(url, target_dir):
     clean_url = base_url.rstrip('/') + '.json'
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
         'Cookie': 'over18=1'
     }
@@ -273,8 +264,22 @@ def download_tiktok_pure(url, target_dir):
 
     raise Exception("دریافت ویدیو از تیک‌تاک ناموفق بود.")
 
+# ---------------------------------------------------------
+# هندلرهای تلگرام
+# ---------------------------------------------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! لینک رسانه بفرست تا دانلودش کنم.")
+    welcome_text = (
+        "💎 **سلام به ربات دانلودر پیشرفته خوش آمدید!**\n\n"
+        "⚡️ **پلتفرم‌های پشتیبانی‌شده:**\n"
+        "▫️ **Spotify** (دانلود موزیک همراه با کاور و متادیتای دقیق)\n"
+        "▫️ **YouTube & YouTube Music** (کیفیت‌های HD/4K + MP3)\n"
+        "▫️ **Instagram** (پست، ریلز و استوری)\n"
+        "▫️ **TikTok** (دانلود بدون واترمارک)\n"
+        "▫️ **Pinterest & Reddit & SoundCloud**\n\n"
+        "🔗 **کافیست لینک رسانه مورد نظر خود را ارسال کنید:**"
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -289,43 +294,59 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not text.startswith(("http://", "https://")):
-        await message.reply_text("لطفاً لینک معتبر ارسال کنید.")
+        await message.reply_text("❌ **لطفاً یک لینک معتبر اینترنتی ارسال کنید.**", parse_mode="Markdown")
         return
 
     url = text
 
+    # --- TikTok ---
     if "tiktok.com" in url or "vm.tiktok.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود مستقیم و بدون واترمارک", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود بدون واترمارک (HD)", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'TikTok Media', 'is_audio_only': False}
-        await update.message.reply_text("🎵 پست تیک‌تاک شناسایی شد.\nجهت دانلود با کیفیت اصلی و بدون واترمارک روی دکمه زیر بزن:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("🎵 **پست تیک‌تاک شناسایی شد.**\nجهت دریافت فایل روی دکمه زیر کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
+    # --- Reddit ---
     if "reddit.com" in url or "r.reddit.com" in url:
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Reddit Post', 'is_audio_only': False}
-        keyboard = [[InlineKeyboardButton("📥 دانلود فوری رسانه (Bypass)", callback_data="fmt_best")]]
-        await update.message.reply_text("📌 پست ردیت شناسایی شد.\nجهت استخراج مستقیم و عبور از سد تایید سن روی دکمه زیر بزن:", reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [[InlineKeyboardButton("⚡️ استخراج مستقیم رسانه", callback_data="fmt_best")]]
+        await update.message.reply_text("📌 **پست ردیت شناسایی شد.**\nجهت دریافت بدون محدودیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    is_spotify = "spotify.com" in url
-    is_soundcloud = "soundcloud.com" in url
-
-    if is_spotify:
-        progress_msg = await update.message.reply_text("⏳ در حال دریافت هوشمند متادیتا و کاور قطعه از اسپاتیفای...")
+    # --- Spotify ---
+    if "spotify.com" in url:
+        progress_msg = await update.message.reply_text("🔍 **در حال استخراج دقیق متادیتا و کاور از اسپاتیفای...**", parse_mode="Markdown")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
         await progress_msg.delete()
-        title, artist, year, thumbnail = (details['title'], details['artist'], details['year'], details['thumbnail']) if details else ("Track", "مشخص نیست", "", None)
+        
+        title = details['title']
+        artist = details['artist']
+        thumbnail = details['thumbnail']
+        
         context.user_data['url'] = url
-        context.user_data['info'] = {'title': title, 'artist': artist, 'year': year, 'is_audio_only': True}
-        keyboard = [[InlineKeyboardButton("❤️ یوتیوب موزیک", callback_data="spo_ytm"), InlineKeyboardButton("🧡 ساندکلاد", callback_data="spo_sc")]]
-        caption = f"🎵 آهنگ: {title}\n🗣️ خواننده: {artist}\n\n🎯 ترجیح میدی نسخه کدوم پلتفرم دانلود بشه؟"
-        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
-        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard))
+        context.user_data['info'] = {'title': title, 'artist': artist, 'is_audio_only': True}
+        
+        keyboard = [
+            [InlineKeyboardButton("❤️ دانلود از YouTube Music", callback_data="spo_ytm")],
+            [InlineKeyboardButton("🧡 دانلود از SoundCloud", callback_data="spo_sc")]
+        ]
+        
+        caption = (
+            f"🎵 **عنوان اثر:** {title}\n"
+            f"👤 **خواننده:** {artist}\n\n"
+            f"✨ **پلتفرم دانلود مورد نظر را انتخاب کنید:**"
+        )
+        if thumbnail:
+            await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    if is_soundcloud:
-        progress_msg = await update.message.reply_text("⏳ در حال بررسی و استخراج کاور ساندکلاد...")
+    # --- SoundCloud ---
+    if "soundcloud.com" in url:
+        progress_msg = await update.message.reply_text("🔍 **در حال بررسی لینک ساندکلاد...**", parse_mode="Markdown")
         sc_title, sc_thumbnail = "SoundCloud Track", None
         try:
             ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
@@ -337,27 +358,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress_msg.delete()
         context.user_data['url'] = url
         context.user_data['info'] = {'is_audio_only': True, 'title': sc_title}
-        keyboard = [[InlineKeyboardButton("📥 دانلود مستقیم صوتی (MP3)", callback_data="fmt_audio")]]
-        caption = f"🎵 ساندکلاد:\n📌 نام: {sc_title}"
-        if sc_thumbnail: await update.message.reply_photo(photo=sc_thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
-        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [[InlineKeyboardButton("🎧 دانلود کیفیت عالی (MP3)", callback_data="fmt_audio")]]
+        caption = f"🎧 **موزیک ساندکلاد:**\n📌 **نام:** {sc_title}"
+        if sc_thumbnail: await update.message.reply_photo(photo=sc_thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
+    # --- Pinterest ---
     if "pinterest" in url or "pin.it" in url:
-        keyboard = [[InlineKeyboardButton("🖼️ دانلود به صورت تصویر / فایل مستقیم", callback_data="fmt_fallback_direct")]]
+        keyboard = [[InlineKeyboardButton("📸 دانلود تصویر / ویدیو کیفیت اصلی", callback_data="fmt_fallback_direct")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Pinterest Media', 'is_audio_only': False}
-        await update.message.reply_text("📸 پینترست شناسایی شد.\nمی‌خوای برات با کیفیت اصلی دانلودش کنم؟", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("📸 **پینترست شناسایی شد.**\nجهت دریافت فایل اصلی کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
+    # --- Instagram ---
     if "instagram.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود فوری پست / ریلز اینستاگرام", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود فوری پست / ریلز", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
-        await update.message.reply_text("📸 پست اینستاگرام شناسایی شد.\nبرای دانلود با بهترین کیفیت روی دکمه زیر بزن:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("🎬 **اینستاگرام شناسایی شد.**\nبرای دانلود با بهترین کیفیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    progress_msg = await update.message.reply_text("⏳ در حال استخراج و آنالیز کیفیت‌های موجود...")
+    # --- Generic / YouTube / Other ---
+    progress_msg = await update.message.reply_text("🧠 **در حال آنالیز لینک و بررسی کیفیت‌های موجود...**", parse_mode="Markdown")
     try:
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -376,34 +400,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 res = f"{f.get('height')}p"
                 if res in seen_resolutions: continue
                 size = f.get('filesize') or f.get('filesize_approx')
-                size_mb = f"({size / (1024 * 1024):.1f} MB)" if size else "(حجم نامشخص)"
+                size_mb = f"({size / (1024 * 1024):.1f} MB)" if size else ""
                 fmt_id = f.get('format_id')
                 callback_id = f"vid_{fmt_id}" if "youtube.com" in url or "youtu.be" in url else f"direct_{fmt_id}"
                 keyboard.append([InlineKeyboardButton(f"🎬 کیفیت {res} {size_mb}", callback_data=callback_id)])
                 seen_resolutions.add(res)
         
         if not keyboard:
-            keyboard.append([InlineKeyboardButton("📥 دانلود با کیفیت پیش‌فرض", callback_data="fmt_best")])
+            keyboard.append([InlineKeyboardButton("📥 دانلود بهترین کیفیت موجود", callback_data="fmt_best")])
 
-        keyboard.append([InlineKeyboardButton("🎵 فقط صوتی (MP3 Audio)", callback_data="fmt_audio")])
+        keyboard.append([InlineKeyboardButton("🎵 استخراج فقط صدا (MP3 Audio)", callback_data="fmt_audio")])
         await progress_msg.delete()
-        caption = f"🎬 رسانه شناسایی شد:\n📌 نام: {title}\n\nکیفیت و حجم مورد نظرت رو انتخاب کن:"
-        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
-        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard))
+        caption = f"🎬 **رسانه شناسایی شد:**\n📌 **عنوان:** {title}\n\n👇 **کیفیت مورد نظرتان را انتخاب کنید:**"
+        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     except Exception as e:
-        keyboard = [[InlineKeyboardButton("📥 تلاش جهت دانلود مستقیم (پشتیبان)", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("⚡️ دانلود مستقیم (پشتیبان)", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Media', 'is_audio_only': False}
         await progress_msg.delete()
-        await update.message.reply_text(f"⚠️ آنالیز با خطا مواجه شد. می‌خوای مستقیم تلاش کنم؟", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("⚠️ **آنالیز کیفیت‌ها موفق نبود. تلاش جهت دانلود مستقیم؟**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def edit_message_safe(query, text):
     try:
         if query.message.photo or query.message.caption: 
-            await query.message.edit_caption(caption=text)
+            await query.message.edit_caption(caption=text, parse_mode="Markdown")
         else: 
-            await query.edit_message_text(text=text)
+            await query.edit_message_text(text=text, parse_mode="Markdown")
     except: pass
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -415,7 +439,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = context.user_data.get('info')
     
     if not url or not info:
-        await query.message.reply_text("❌ اطلاعات منقضی شده است.")
+        await query.message.reply_text("❌ **اطلاعات نشست منقضی شده است. لطفاً لینک را دوباره ارسال کنید.**", parse_mode="Markdown")
         return
         
     main_loop = asyncio.get_running_loop()
@@ -425,9 +449,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nonlocal last_update_time
         current_time = time.time()
         if d['status'] == 'finished':
-            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨 100%\n⚡ دانلود کامل شد! در حال آماده‌سازی فایل..."), main_loop)
+            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "⚡️ **دانلود کامل شد! در حال پردازش و تبدیل...**"), main_loop)
             return
-        if d['status'] == 'downloading' and current_time - last_update_time > 0.4:
+        if d['status'] == 'downloading' and current_time - last_update_time > 0.5:
             last_update_time = current_time
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             downloaded = d.get('downloaded_bytes', 0)
@@ -436,10 +460,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 speed = d.get('speed', 0) or 0
                 speed_mb = speed / (1024 * 1024) if speed > 0 else 0
                 filled_blocks = int(percent // 10)
-                bar = "🟨" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📥 در حال دانلود فایل منبع...\n\n{bar} {percent:.1f}%\n⚡ سرعت: {speed_mb:.2f} MB/s"
+                bar = "🟦" * filled_blocks + "⬜" * (10 - filled_blocks)
+                status_text = f"📥 **در حال دریافت فایل از سرور...**\n\n{bar} `{percent:.1f}%` \n🚀 **سرعت:** `{speed_mb:.2f} MB/s`"
             else:
-                status_text = "📥 در حال دانلود و دریافت اطلاعات حجم..."
+                status_text = "📥 **در حال استخراج و دانلود فایل...**"
             asyncio.run_coroutine_threadsafe(edit_message_safe(query, status_text), main_loop)
 
     is_reddit = "reddit.com" in url or "r.reddit.com" in url
@@ -448,7 +472,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_tiktok = "tiktok.com" in url or "vm.tiktok.com" in url
     
     reddit_bypass_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': '*/*',
         'Cookie': 'over18=1',
         'Referer': 'https://old.reddit.com/'
@@ -473,7 +497,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if is_audio:
         ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192'
+        }]
     elif not is_instagram and data.startswith("vid_"):
         fmt_id = data.split("_")[1]
         ydl_opts['format'] = f"{fmt_id}+bestaudio/best"
@@ -485,9 +513,16 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ydl_opts['format'] = 'bestvideo+bestaudio/best'
         ydl_opts['merge_output_format'] = 'mp4'
 
+    # دانلود دقیق موزیک‌های اسپاتیفای از یوتیوب موزیک یا ساندکلاد
     if data.startswith("spo_"):
-        search_query = f"{info.get('title', '')} {info.get('artist', '')}".strip()
-        download_url = f"ytsearch1:{search_query} audio" if data == "spo_ytm" else f"scsearch1:{search_query}"
+        track_title = info.get('title', '')
+        track_artist = info.get('artist', '')
+        search_query = f"{track_artist} {track_title}".strip()
+        
+        if data == "spo_ytm":
+            download_url = f"ytsearch1:{search_query} audio"
+        else:
+            download_url = f"scsearch1:{search_query}"
         ydl_opts['default_search'] = 'auto'
     else:
         download_url = url
@@ -498,7 +533,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_image_doc = False
     
     try:
-        await edit_message_safe(query, "📥 در حال جستجو، اتصال به سرور و دانلود فایل اصلی...")
+        await edit_message_safe(query, "⚡️ **در حال اتصال به سرور و دانلود فایل اصلی...**")
         
         if is_tiktok:
             try:
@@ -562,7 +597,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filename = downloaded_files[0]
 
         if not filename or not os.path.exists(filename):
-            raise Exception("آهنگ یا ویدیو در جستجو پیدا نشد یا فایل دریافت نگردید.")
+            raise Exception("فایل موردنظر در سرور منبع پیدا نشد یا دانلود نشد.")
 
         chat_id = query.message.chat_id
 
@@ -593,29 +628,35 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 last_upload_update = now
                 percent = (uploaded_bytes / total_bytes) * 100
                 filled_blocks = int(percent // 10)
-                bar = "🟦" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📤 در حال آپلود روی تلگرام...\n\n{bar} {percent:.1f}%"
+                bar = "🟩" * filled_blocks + "⬜" * (10 - filled_blocks)
+                status_text = f"📤 **در حال آپلود روی تلگرام...**\n\n{bar} `{percent:.1f}%`"
                 context.application.create_task(edit_message_safe(query, status_text))
 
         _, ext = os.path.splitext(filename.lower())
         
         with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
             if is_audio:
-                caption_text = f"🎵 {res_title}\n🗣️ خواننده: {info.get('artist', 'مشخص نیست')}\n\n#Music"
+                artist_name = info.get('artist', 'نامشخص')
+                song_title = info.get('title', res_title)
+                caption_text = f"🎵 **{song_title}**\n👤 **خواننده:** {artist_name}\n\n🤖 @Heisenberg_bot"
                 await context.bot.send_audio(
-                    chat_id=chat_id, audio=tracked_file, filename=f"{info.get('artist', 'Track')} - {res_title}.mp3",
-                    caption=caption_text, performer=info.get('artist', 'مشخص نیست'), title=res_title,
-                    read_timeout=180, write_timeout=180
+                    chat_id=chat_id, audio=tracked_file, 
+                    filename=f"{artist_name} - {song_title}.mp3",
+                    caption=caption_text, 
+                    performer=artist_name, 
+                    title=song_title,
+                    read_timeout=180, write_timeout=180, parse_mode="Markdown"
                 )
             elif (ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif'] or is_image_doc) and ext != '.mp4':
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=tracked_file,
-                    caption=f"🖼️ {res_title}\n\n#File"
+                    caption=f"🖼️ **{res_title}**\n\n🤖 @Heisenberg_bot", parse_mode="Markdown"
                 )
             else:
                 await context.bot.send_video(
                     chat_id=chat_id, video=tracked_file, filename=os.path.basename(filename),
-                    caption=f"🎬 {res_title}\n\n#Video", read_timeout=180, write_timeout=180
+                    caption=f"🎬 **{res_title}**\n\n🤖 @Heisenberg_bot", 
+                    read_timeout=180, write_timeout=180, parse_mode="Markdown"
                 )
         
         if filename and os.path.exists(filename): os.remove(filename)
@@ -628,7 +669,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for f in downloaded_files:
             if os.path.exists(f): os.remove(f)
         clean_err = str(e).replace("ERROR:", "").strip()
-        await query.message.reply_text(f"❌ خطا در دانلود یا ارسال نهایی فایل:\n{clean_err}")
+        await query.message.reply_text(f"❌ **خطا در دانلود یا ارسال نهایی:**\n`{clean_err}`", parse_mode="Markdown")
 
 def main():
     if not os.path.exists('downloads'): os.makedirs('downloads')
