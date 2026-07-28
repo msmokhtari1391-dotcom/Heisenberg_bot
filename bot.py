@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import yt_dlp
 
 # ---------------------------------------------------------
-# توکن‌ها و تنظیمات
+# تنظیمات اصلی
 # ---------------------------------------------------------
 TOKEN = '8897975172:AAFXrND5_zFFeSsGDxD9lYdF32zwhTFtpds'
 
@@ -18,27 +18,6 @@ BROWSER_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
 }
-
-class ProgressFileWriter:
-    def __init__(self, filename, callback):
-        self.file = open(filename, 'rb')
-        self.total_size = os.path.getsize(filename)
-        self.callback = callback
-
-    def read(self, size=-1):
-        chunk = self.file.read(size)
-        if chunk:
-            self.callback(len(chunk), self.total_size)
-        return chunk
-
-    def close(self):
-        self.file.close()
-
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
 def get_spotify_details_pure(url):
     try:
@@ -65,18 +44,10 @@ def get_spotify_details_pure(url):
                 title = parts[1].strip()
                 
             return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
-
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
-            title = info.get('track') or info.get('title', 'Track')
-            artist = info.get('artist') or info.get('uploader') or "نامشخص"
-            thumbnail = info.get('thumbnail')
-
-        return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
     except Exception as e:
-        print(f"Error extracting Spotify details: {e}")
-        return {'title': 'Track', 'artist': 'نامشخص', 'thumbnail': None}
+        print(f"Spotify OEmbed Error: {e}")
+    
+    return {'title': 'Spotify Track', 'artist': 'نامشخص', 'thumbnail': None}
 
 def download_instagram_pure(url, target_dir):
     session = requests.Session()
@@ -89,9 +60,8 @@ def download_instagram_pure(url, target_dir):
     }
     
     downloaded_files = []
-    res_title = "Instagram Media"
     
-    # ۱. استفاده از Cobalt API به عنوان امن‌ترین و سریع‌ترین متد بدون بلاک
+    # استفاده از Cobalt API (بهینه‌ترین و بی‌خطاترین روش برای اینستاگرام)
     try:
         payload = {"url": clean_url, "vQuality": "max"}
         cobalt_headers = {
@@ -128,81 +98,19 @@ def download_instagram_pure(url, target_dir):
                                     if chunk: f.write(chunk)
                             downloaded_files.append(out_path)
     except Exception as e:
-        print(f"Cobalt API error: {e}")
+        print(f"Cobalt Instagram Error: {e}")
 
     if downloaded_files:
-        return downloaded_files, res_title, False
+        return downloaded_files, "Instagram Media"
 
-    # ۲. متد جایگزین از طریق SnapInsta / API عمومی جهت پوشش کامل
-    try:
-        api_fallback = f"https://tiklydown.eu.org/api/download?url={clean_url}" # چک کردن ای‌پای کمکی
-        # در اینجا از yt-dlp با پارامترهای آپدیت شده اینستاگرام استفاده می‌کنیم
-        ydl_opts = {
-            'outtmpl': os.path.join(target_dir, 'ig_%(id)s_%(autonumber)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
-            'noplaylist': False,
-            'http_headers': BROWSER_HEADERS,
-            'ignoreerrors': True
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=True)
-            if info:
-                res_title = info.get('title', 'Instagram Media')
-                entries = info.get('entries', [info])
-                for entry in entries:
-                    if entry:
-                        p = ydl.prepare_filename(entry)
-                        if os.path.exists(p):
-                            downloaded_files.append(p)
-                        else:
-                            base, _ = os.path.splitext(p)
-                            for ext in ['.mp4', '.jpg', '.jpeg', '.png', '.webp']:
-                                if os.path.exists(base + ext):
-                                    downloaded_files.append(base + ext)
-                                    break
-    except Exception as e:
-        print(f"yt-dlp fallback error: {e}")
-
-    if downloaded_files:
-        return downloaded_files, res_title, False
-
-    raise Exception("این پست اینستاگرام قابلیت دانلود ندارد یا لینک خصوصی/نامعتبر است.")
-
-def download_tiktok_pure(url, target_dir):
-    session = requests.Session()
-    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    headers = BROWSER_HEADERS.copy()
-    
-    res = session.get(api_url, headers=headers, timeout=15)
-    if res.status_code == 200:
-        data = res.json()
-        title = data.get('title', 'TikTok Media')
-        title = re.sub(r'[\\/*?:"<>|]', "", title)
-        
-        video_data = data.get('video', {})
-        v_url = video_data.get('noWatermark') or video_data.get('watermark')
-        if v_url:
-            out_path = os.path.join(target_dir, f"tt_{int(time.time())}.mp4")
-            v_res = session.get(v_url, headers=headers, stream=True)
-            if v_res.status_code == 200:
-                with open(out_path, 'wb') as f:
-                    for chunk in v_res.iter_content(chunk_size=8192):
-                        if chunk: f.write(chunk)
-                return out_path, title, False
-
-    raise Exception("تیک‌تاک دانلود نشد.")
+    raise Exception("اینستاگرام لینک را مسدود کرد یا پست خصوصی است.")
 
 # ---------------------------------------------------------
-# هندلرهای تلگرام
+# هندلرهای ربات
 # ---------------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "💎 <b>سلام! ربات با کدهای اصلاح‌شده و پایدار آماده است.</b>\n\n"
-        "🔗 لینک اسپاتیفای، اینستاگرام، یوتیوب یا تیک‌تاک خود را ارسال کنید:"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="HTML")
+    await update.message.reply_text("💎 ربات آماده است. لینک خود را بفرستید.", parse_mode="HTML")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -210,20 +118,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = message.text.strip()
-    
-    try:
-        await message.set_reaction("🫡")
-    except Exception:
-        pass
-
     if not text.startswith(("http://", "https://")):
-        await message.reply_text("❌ <b>لطفاً یک لینک معتبر بفرستید.</b>", parse_mode="HTML")
+        await message.reply_text("❌ لطفاً یک لینک معتبر بفرستید.", parse_mode="HTML")
         return
 
     url = text
 
     if "spotify.com" in url:
-        progress_msg = await update.message.reply_text("🔍 <b>در حال استخیص اطلاعات از اسپاتیفای...</b>", parse_mode="HTML")
+        progress_msg = await update.message.reply_text("🔍 در حال استخراج مشخصات از اسپاتیفای...", parse_mode="HTML")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
         await progress_msg.delete()
         
@@ -234,16 +136,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['url'] = url
         context.user_data['info'] = {'title': title, 'artist': artist, 'is_audio_only': True}
         
-        keyboard = [
-            [InlineKeyboardButton("❤️ دانلود از YouTube Music", callback_data="spo_ytm")],
-            [InlineKeyboardButton("🧡 دانلود از SoundCloud", callback_data="spo_sc")]
-        ]
+        keyboard = [[InlineKeyboardButton("❤️ دانلود از YouTube Music", callback_data="spo_ytm")]]
+        caption = f"🎵 <b>{title}</b>\n👤 <b>{artist}</b>"
         
-        caption = (
-            f"🎵 <b>موزیک:</b> {title}\n"
-            f"👤 <b>هنرمند:</b> {artist}\n\n"
-            f"✨ <b>منبع دانلود را انتخاب کنید:</b>"
-        )
         if thumbnail:
             await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
@@ -251,53 +146,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "instagram.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز اینستاگرام", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود از اینستاگرام", callback_data="fmt_instagram")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
-        await update.message.reply_text("🎬 <b>لینک اینستاگرام شناسایی شد.</b>\nبرای دریافت فایل کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text("🎬 لینک اینستاگرام شناسایی شد:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
-    if "tiktok.com" in url or "vm.tiktok.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود بدون واترمارک", callback_data="fmt_best")]]
-        context.user_data['url'] = url
-        context.user_data['info'] = {'title': 'TikTok Media', 'is_audio_only': False}
-        await update.message.reply_text("🎵 <b>تیک‌تاک شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        return
-
-    progress_msg = await update.message.reply_text("🧠 <b>در حال آنالیز لینک...</b>", parse_mode="HTML")
-    try:
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True, 'http_headers': BROWSER_HEADERS}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            meta = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(url, download=False))
-
-        title = meta.get('title', 'Media')
-        thumbnail = meta.get('thumbnail')
-        context.user_data['url'] = url
-        context.user_data['info'] = {'title': title, 'is_audio_only': False}
-
-        keyboard = [
-            [InlineKeyboardButton("📥 دانلود بهترین کیفیت", callback_data="fmt_best")],
-            [InlineKeyboardButton("🎵 استخراج صوت (MP3)", callback_data="fmt_audio")]
-        ]
-        await progress_msg.delete()
-        caption = f"🎬 <b>رسانه:</b> {title}\n\n👇 <b>انتخاب کیفیت:</b>"
-        if thumbnail: await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-        else: await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    except Exception as e:
-        keyboard = [[InlineKeyboardButton("⚡️ دانلود مستقیم", callback_data="fmt_best")]]
-        context.user_data['url'] = url
-        context.user_data['info'] = {'title': 'Media', 'is_audio_only': False}
-        await progress_msg.delete()
-        await update.message.reply_text("⚠️ خطا در آنالیز. تلاش برای دانلود مستقیم؟", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-async def edit_message_safe(query, text):
-    try:
-        if query.message.photo or query.message.caption: 
-            await query.message.edit_caption(caption=text, parse_mode="HTML")
-        else: 
-            await query.edit_message_text(text=text, parse_mode="HTML")
-    except: pass
+    # برای بقیه لینک‌ها
+    context.user_data['url'] = url
+    context.user_data['info'] = {'title': 'Media', 'is_audio_only': False}
+    keyboard = [[InlineKeyboardButton("📥 دانلود فایل", callback_data="fmt_best")]]
+    await update.message.reply_text("📌 لینک دریافت شد. جهت دانلود کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -308,112 +167,95 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = context.user_data.get('info')
     
     if not url or not info:
-        await query.message.reply_text("❌ اطلاعات منقضی شد. لطفاً دوباره لینک بفرستید.", parse_mode="HTML")
+        await query.message.reply_text("❌ اطلاعات منقضی شد.", parse_mode="HTML")
         return
         
     main_loop = asyncio.get_running_loop()
-    
-    def progress_hook(d):
-        if d['status'] == 'finished':
-            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "⚡️ دانلود کامل شد! در حال ارسال..."), main_loop)
-
-    is_instagram = "instagram.com" in url
-    ydl_opts = {
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'progress_hooks': [progress_hook],
-        'http_headers': BROWSER_HEADERS,
-        'ignoreerrors': True
-    }
-    
-    is_audio = data == "fmt_audio" or data.startswith("spo_")
-    
-    if is_audio:
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192'
-        }]
-    elif not is_instagram:
-        ydl_opts['format'] = 'bestvideo+bestaudio/best'
-        ydl_opts['merge_output_format'] = 'mp4'
-
-    if data.startswith("spo_"):
-        track_title = info.get('title', '')
-        track_artist = info.get('artist', '')
-        search_query = f"{track_artist} {track_title}".strip()
-        download_url = f"ytsearch1:{search_query} audio" if data == "spo_ytm" else f"scsearch1:{search_query}"
-        ydl_opts['default_search'] = 'auto'
-    else:
-        download_url = url
-
-    filename = None
-    downloaded_files = []
-    res_title = info.get('title', 'Media')
+    chat_id = query.message.chat_id
     
     try:
-        await edit_message_safe(query, "⚡️ در حال دانلود فایل...")
+        await query.message.edit_text("⚡️ در حال دانلود...")
         
-        if is_instagram:
-            downloaded_files, res_title, _ = await main_loop.run_in_executor(
-                None, lambda: download_instagram_pure(download_url, 'downloads')
+        filename = None
+        downloaded_files = []
+        
+        if data == "fmt_instagram":
+            downloaded_files, _ = await main_loop.run_in_executor(
+                None, lambda: download_instagram_pure(url, 'downloads')
             )
-        else:
+        elif data == "spo_ytm":
+            track_title = info.get('title', '')
+            track_artist = info.get('artist', '')
+            search_query = f"{track_artist} {track_title}".strip()
+            
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
+                'default_search': 'ytsearch1',
+                'quiet': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192'
+                }]
+            }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                download_info = await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
-                
-                if download_info and 'entries' in download_info:
-                    for entry in download_info['entries']:
-                        if entry:
-                            f_path = ydl.prepare_filename(entry)
-                            if data.startswith("spo_"): f_path = os.path.splitext(f_path)[0] + ".mp3"
-                            if os.path.exists(f_path): downloaded_files.append(f_path)
+                res_info = await main_loop.run_in_executor(None, lambda: ydl.extract_info(search_query, download=True))
+                if 'entries' in res_info and res_info['entries']:
+                    item = res_info['entries'][0]
+                    filename = ydl.prepare_filename(item)
+                    filename = os.path.splitext(filename)[0] + ".mp3"
                 else:
-                    if download_info:
-                        filename = ydl.prepare_filename(download_info)
-                        if data.startswith("spo_"): filename = os.path.splitext(filename)[0] + ".mp3"
+                    raise Exception("موزیک مورد نظر در یوتیوب پیدا نشد.")
+        else:
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'ignoreerrors': True
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                res_info = await main_loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
+                if res_info:
+                    if 'entries' in res_info:
+                        for entry in res_info['entries']:
+                            if entry:
+                                f_path = ydl.prepare_filename(entry)
+                                if os.path.exists(f_path): downloaded_files.append(f_path)
+                    else:
+                        filename = ydl.prepare_filename(res_info)
 
         if not filename and downloaded_files:
-            filename = downloaded_files[0]
+            if len(downloaded_files) == 1:
+                filename = downloaded_files[0]
+            else:
+                # ارسال به صورت آلبوم عکس یا ویدیو
+                media_group = [InputMediaPhoto(open(f, 'rb')) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) else InputMediaVideo(open(f, 'rb')) for f in downloaded_files]
+                await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+                for f in downloaded_files:
+                    if os.path.exists(f): os.remove(f)
+                await query.message.delete()
+                return
 
-        if not filename and not downloaded_files:
-            raise Exception("فایل یافت نشد.")
-
-        chat_id = query.message.chat_id
-
-        if len(downloaded_files) > 1 and not is_audio:
-            media_group = [InputMediaPhoto(open(f, 'rb')) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) else InputMediaVideo(open(f, 'rb')) for f in downloaded_files]
-            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
-            for f in downloaded_files:
-                if os.path.exists(f): os.remove(f)
-            await query.message.delete()
-            return
-
-        if not filename and downloaded_files:
-            filename = downloaded_files[0]
+        if not filename or not os.path.exists(filename):
+            raise Exception("فایل خروجی ایجاد نشد.")
 
         _, ext = os.path.splitext(filename.lower())
-        
         with open(filename, 'rb') as f_obj:
-            if is_audio:
-                await context.bot.send_audio(chat_id=chat_id, audio=f_obj, caption=f"🎵 {res_title}", parse_mode="HTML")
+            if data == "spo_ytm":
+                await context.bot.send_audio(chat_id=chat_id, audio=f_obj, caption=f"🎵 {info.get('title')}", parse_mode="HTML")
             elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                await context.bot.send_photo(chat_id=chat_id, photo=f_obj, caption=f"🖼️ {res_title}", parse_mode="HTML")
+                await context.bot.send_photo(chat_id=chat_id, photo=f_obj, parse_mode="HTML")
             else:
-                await context.bot.send_video(chat_id=chat_id, video=f_obj, caption=f"🎬 {res_title}", parse_mode="HTML")
-        
-        if filename and os.path.exists(filename): os.remove(filename)
+                await context.bot.send_video(chat_id=chat_id, video=f_obj, parse_mode="HTML")
+                
+        if os.path.exists(filename): os.remove(filename)
         for f in downloaded_files:
             if os.path.exists(f): os.remove(f)
         await query.message.delete()
-        
+
     except Exception as e:
-        if filename and os.path.exists(filename): os.remove(filename)
-        for f in downloaded_files:
-            if os.path.exists(f): os.remove(f)
         await query.message.reply_text(f"❌ خطا: {str(e)}", parse_mode="HTML")
 
 def main():
@@ -422,8 +264,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running with fixes...")
+    print("Bot is running...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
+
