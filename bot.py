@@ -266,63 +266,59 @@ def download_instagram_pure(url, target_dir):
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://snapinsta.app/'
     }
     
     try:
-        # روش اول: استفاده از API های جایگزین سریع و پایدار برای اینستاگرام
-            api_url = f"https://tikwm.com/api/?url={clean_url}" # یا استفاده از استخراجگر عمومی
-            res = session.get(api_url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                if data.get('code') == 0:
-                    item = data.get('data', {})
-                    # اگر ویدیو بود
-                    v_url = item.get('play') or item.get('url')
-                    if v_url:
-                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
-                        v_res = session.get(v_url, headers=headers, stream=True)
-                        if v_res.status_code == 200:
-                            with open(out_path, 'wb') as f:
-                                for chunk in v_res.iter_content(chunk_size=8192):
-                                    if chunk: f.write(chunk)
-                            return [out_path], "Instagram Media", False
+        # استفاده از API پایدار برای دور زدن محدودیت‌های سخت اینستاگرام روی سرور
+        api_endpoints = [
+            f"https://api.cobalt.tools/api/json",
+            f"https://tikwm.com/api/?url={clean_url}"
+        ]
+        
+        # تلاش با Cobalt API
+        payload = {"url": clean_url, "vQuality": "max"}
+        cobalt_headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+        }
+        res = session.post("https://api.cobalt.tools/api/json", json=payload, headers=cobalt_headers, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            dl_url = data.get('url') or data.get('picker', [{}])[0].get('url')
+            if dl_url:
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
+                v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
+                if v_res.status_code == 200:
+                    with open(out_path, 'wb') as f:
+                        for chunk in v_res.iter_content(chunk_size=8192):
+                            if chunk: f.write(chunk)
+                    return [out_path], "Instagram Media", False
     except:
         pass
 
-    # روش دوم و اصلی با Cobalt یا ابزارهای کمکی / yt-dlp ایمن شده با سشن اختصاصی
-    ydl_opts = {
-        'outtmpl': os.path.join(target_dir, 'ig_%(id)s_%(autonumber)s.%(ext)s'),
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-    }
-    
-    downloaded_files = []
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(clean_url, download=True)
-        if info:
-            if 'entries' in info:
-                for entry in info['entries']:
-                    if entry:
-                        f_path = ydl.prepare_filename(entry)
-                        if os.path.exists(f_path):
-                            downloaded_files.append(f_path)
-            else:
-                f_path = ydl.prepare_filename(info)
-                if os.path.exists(f_path):
-                    downloaded_files.append(f_path)
-                    
-    if downloaded_files:
-        return downloaded_files, info.get('title', 'Instagram Media'), False
+    # روش جایگزین با tikwm
+    try:
+        res = session.get(f"https://tikwm.com/api/?url={clean_url}", headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get('code') == 0:
+                item = data.get('data', {})
+                v_url = item.get('play') or item.get('url')
+                if v_url:
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}.mp4")
+                    v_res = session.get(v_url, headers=headers, stream=True)
+                    if v_res.status_code == 200:
+                        with open(out_path, 'wb') as f:
+                            for chunk in v_res.iter_content(chunk_size=8192):
+                                if chunk: f.write(chunk)
+                        return [out_path], "Instagram Media", False
+    except:
+        pass
 
-    raise Exception("امکان دانلود پست اینستاگرام فراهم نشد. لینک معتبر نیست یا نیاز به لاگین دارد.")
+    raise Exception("امکان دانلود پست اینستاگرام فراهم نشد. لینک معتبر نیست یا سرور مسدود شده است.")
 
 # ---------------------------------------------------------
 # هندلرهای تلگرام
@@ -739,7 +735,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with fixed Instagram downloader...")
+    print("Bot is running successfully with fully fixed Instagram downloader...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
