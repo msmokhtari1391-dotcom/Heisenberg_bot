@@ -58,14 +58,14 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 def download_instagram_pure(url, target_dir):
-    """استخراج مستقیم و قدرتمند اسلایدها و ریلز اینستاگرام با موتور Cobalt API"""
-    clean_url = url.split('?')[0]
+    """دانلود مطمئن و مستقیم اسلایدها و ریلز اینستاگرام بدون نیاز به yt-dlp"""
+    clean_url = url.split('?')[0].rstrip('/')
     session = requests.Session()
     
-    cobalt_instances = [
-        "https://cobalt-api.kwiatekm.tokyo",
-        "https://api.cobalt.tools",
-        "https://cobalt.q1.i.ng"
+    api_endpoints = [
+        "https://api.cobalt.tools/",
+        "https://cobalt-api.kwiatekm.tokyo/",
+        "https://cobalt.q1.i.ng/"
     ]
     
     payload = {
@@ -82,24 +82,27 @@ def download_instagram_pure(url, target_dir):
     
     downloaded_paths = []
     
-    for instance in cobalt_instances:
+    # متد اصلی: موتور Cobalt
+    for endpoint in api_endpoints:
         try:
-            res = session.post(f"{instance}/", json=payload, headers=headers, timeout=10)
+            res = session.post(endpoint, json=payload, headers=headers, timeout=12)
             if res.status_code == 200:
                 data = res.json()
                 status = data.get("status")
                 
-                # تک فایل (ویدیو یا عکس)
+                # حالت اول: تک ویدیو یا تک عکس
                 if status in ["redirect", "tunnel"]:
                     media_url = data.get("url")
                     ext = ".mp4" if "video" in res.text or ".mp4" in media_url else ".jpg"
                     out_path = os.path.join(target_dir, f"ig_{int(time.time())}_00{ext}")
+                    
                     r = session.get(media_url, stream=True, timeout=15)
-                    with open(out_path, 'wb') as f:
-                        for chunk in r.iter_content(8192): f.write(chunk)
-                    return [out_path]
+                    if r.status_code == 200:
+                        with open(out_path, 'wb') as f:
+                            for chunk in r.iter_content(8192): f.write(chunk)
+                        return [out_path]
 
-                # حالت کاروسل / چند اسلاید (Picker)
+                # حالت دوم: کاروسل / چند اسلاید (Picker)
                 elif status == "picker":
                     picker_items = data.get("picker", [])
                     for idx, item in enumerate(picker_items):
@@ -120,25 +123,17 @@ def download_instagram_pure(url, target_dir):
         except Exception:
             continue
 
-    # فال‌بک با yt-dlp در صورت عدم پاسخ‌دهی سرورها
+    # متد رزرو (Backup API)
     try:
-        shortcode = clean_url.split('/p/')[-1].split('/reel/')[-1].split('/')[0]
-        ydl_opts = {
-            'outtmpl': os.path.join(target_dir, f'ig_{shortcode}_%(playlist_index)02d.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
-            'http_headers': BROWSER_HEADERS,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([clean_url])
-
-        files = [
-            os.path.join(target_dir, f) for f in os.listdir(target_dir)
-            if f.startswith(f"ig_{shortcode}_")
-        ]
-        if files:
-            files.sort()
-            return files
+        backup_url = f"https://v3.tikwm.com/api/?url={clean_url}"
+        res = session.get(backup_url, timeout=10).json()
+        if res.get("data", {}).get("play"):
+            v_url = res["data"]["play"]
+            out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
+            r = session.get(v_url, stream=True, timeout=15)
+            with open(out_path, 'wb') as f:
+                for chunk in r.iter_content(8192): f.write(chunk)
+            return [out_path]
     except Exception:
         pass
 
@@ -590,7 +585,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال دریافت اسلایدها...</b>")
         
-        # پردازش اختصاصی تمام اسلایدهای اینستاگرام با موتور Cobalt
+        # پردازش اختصاصی اینستاگرام
         if is_instagram:
             try:
                 ig_files = await main_loop.run_in_executor(
@@ -598,7 +593,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if ig_files:
                     ig_files.sort()
-                    # ارسال در دسته‌های ۱۰ تایی تلگرام
                     for i in range(0, len(ig_files), 10):
                         chunk_files = ig_files[i:i + 10]
                         media_group = []
@@ -723,6 +717,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
+    
     print("Bot is running...")
     app.run_polling(drop_pending_updates=True)
 
