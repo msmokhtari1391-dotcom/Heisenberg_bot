@@ -41,9 +41,7 @@ class ProgressFileWriter:
         self.close()
 
 def get_spotify_details_pure(url):
-    """ استخراج دقیق متادیتای اسپاتیفای بدون نیاز به API Key """
     try:
-        # پاکسازی لینک اسپاتیفای از پارامترهای اضافی
         clean_url = url.split('?')[0]
         oembed_url = f"https://open.spotify.com/oembed?url={clean_url}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -57,7 +55,6 @@ def get_spotify_details_pure(url):
             artist = "نامشخص"
             title = title_full
             
-            # تفکیک دقیق نام خواننده و آهنگ از ساختار oEmbed اسپاتیفای
             if " by " in title_full:
                 parts = title_full.rsplit(" by ", 1)
                 title = parts[0].strip()
@@ -69,7 +66,6 @@ def get_spotify_details_pure(url):
                 
             return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
 
-        # متد پشتیبان با yt_dlp
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -299,7 +295,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     url = text
 
-    # --- TikTok ---
     if "tiktok.com" in url or "vm.tiktok.com" in url:
         keyboard = [[InlineKeyboardButton("📥 دانلود بدون واترمارک (HD)", callback_data="fmt_best")]]
         context.user_data['url'] = url
@@ -307,7 +302,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🎵 **پست تیک‌تاک شناسایی شد.**\nجهت دریافت فایل روی دکمه زیر کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- Reddit ---
     if "reddit.com" in url or "r.reddit.com" in url:
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Reddit Post', 'is_audio_only': False}
@@ -315,7 +309,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📌 **پست ردیت شناسایی شد.**\nجهت دریافت بدون محدودیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- Spotify ---
     if "spotify.com" in url:
         progress_msg = await update.message.reply_text("🔍 **در حال استخراج دقیق متادیتا و کاور از اسپاتیفای...**", parse_mode="Markdown")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
@@ -344,7 +337,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- SoundCloud ---
     if "soundcloud.com" in url:
         progress_msg = await update.message.reply_text("🔍 **در حال بررسی لینک ساندکلاد...**", parse_mode="Markdown")
         sc_title, sc_thumbnail = "SoundCloud Track", None
@@ -364,7 +356,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- Pinterest ---
     if "pinterest" in url or "pin.it" in url:
         keyboard = [[InlineKeyboardButton("📸 دانلود تصویر / ویدیو کیفیت اصلی", callback_data="fmt_fallback_direct")]]
         context.user_data['url'] = url
@@ -372,7 +363,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📸 **پینترست شناسایی شد.**\nجهت دریافت فایل اصلی کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- Instagram ---
     if "instagram.com" in url:
         keyboard = [[InlineKeyboardButton("📥 دانلود فوری پست / ریلز", callback_data="fmt_best")]]
         context.user_data['url'] = url
@@ -380,7 +370,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🎬 **اینستاگرام شناسایی شد.**\nبرای دانلود با بهترین کیفیت کلیک کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
 
-    # --- Generic / YouTube / Other ---
     progress_msg = await update.message.reply_text("🧠 **در حال آنالیز لینک و بررسی کیفیت‌های موجود...**", parse_mode="Markdown")
     try:
         ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True, 'http_headers': BROWSER_HEADERS}
@@ -513,7 +502,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ydl_opts['format'] = 'bestvideo+bestaudio/best'
         ydl_opts['merge_output_format'] = 'mp4'
 
-    # دانلود دقیق موزیک‌های اسپاتیفای از یوتیوب موزیک یا ساندکلاد
     if data.startswith("spo_"):
         track_title = info.get('title', '')
         track_artist = info.get('artist', '')
@@ -635,9 +623,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, ext = os.path.splitext(filename.lower())
         
         with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
+            
+            # این خطوط اضافه شدن تا ارور ۴۲ تلگرام رو کلا از بین ببرن (کاراکترهای مزاحم پاک میشن)
+            safe_title = str(res_title).replace('_', ' ').replace('*', ' ').replace('[', '').replace(']', '').replace('`', '')
+            
             if is_audio:
-                artist_name = info.get('artist', 'نامشخص')
-                song_title = info.get('title', res_title)
+                artist_name = str(info.get('artist', 'نامشخص')).replace('_', ' ').replace('*', '')
+                song_title = str(info.get('title', res_title)).replace('_', ' ').replace('*', '')
                 caption_text = f"🎵 **{song_title}**\n👤 **خواننده:** {artist_name}\n\n🤖 @Heisenberg_bot"
                 await context.bot.send_audio(
                     chat_id=chat_id, audio=tracked_file, 
@@ -650,12 +642,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif (ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif'] or is_image_doc) and ext != '.mp4':
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=tracked_file,
-                    caption=f"🖼️ **{res_title}**\n\n🤖 @Heisenberg_bot", parse_mode="Markdown"
+                    caption=f"🖼️ **{safe_title}**\n\n🤖 @Heisenberg_bot", parse_mode="Markdown"
                 )
             else:
                 await context.bot.send_video(
                     chat_id=chat_id, video=tracked_file, filename=os.path.basename(filename),
-                    caption=f"🎬 **{res_title}**\n\n🤖 @Heisenberg_bot", 
+                    caption=f"🎬 **{safe_title}**\n\n🤖 @Heisenberg_bot", 
                     read_timeout=180, write_timeout=180, parse_mode="Markdown"
                 )
         
@@ -679,7 +671,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with fully fixed Spotify artist extraction...")
+    print("Bot is running successfully with fixed Telegram Markdown parsing...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
