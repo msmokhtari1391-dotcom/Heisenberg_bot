@@ -74,7 +74,8 @@ def download_instagram_via_api(url, target_dir):
             if status in ['stream', 'redirect']:
                 dl_url = data.get('url')
                 if dl_url:
-                    ext = '.mp4' if 'mp4' in dl_url.lower() or 'video' in dl_url.lower() else '.jpg'
+                    is_video = 'mp4' in dl_url.lower() or 'video' in dl_url.lower() or data.get('type') == 'video'
+                    ext = '.mp4' if is_video else '.jpg'
                     out_path = os.path.join(target_dir, f"ig_{int(time.time())}{ext}")
                     v_res = session.get(dl_url, headers=headers, stream=True, timeout=20)
                     if v_res.status_code == 200:
@@ -105,13 +106,37 @@ def download_instagram_via_api(url, target_dir):
 
     raise Exception("اینستاگرام لینک را مسدود کرد یا پست در دسترس نیست.")
 
+def download_tiktok_pure(url, target_dir):
+    session = requests.Session()
+    api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
+    headers = BROWSER_HEADERS.copy()
+    
+    res = session.get(api_url, headers=headers, timeout=15)
+    if res.status_code == 200:
+        data = res.json()
+        title = data.get('title', 'TikTok Media')
+        title = re.sub(r'[\\/*?:"<>|]', "", title)
+        
+        video_data = data.get('video', {})
+        v_url = video_data.get('noWatermark') or video_data.get('watermark')
+        if v_url:
+            out_path = os.path.join(target_dir, f"tt_{int(time.time())}.mp4")
+            v_res = session.get(v_url, headers=headers, stream=True)
+            if v_res.status_code == 200:
+                with open(out_path, 'wb') as f:
+                    for chunk in v_res.iter_content(chunk_size=8192):
+                        if chunk: f.write(chunk)
+                return out_path, title, False
+
+    raise Exception("دریافت ویدیو از تیک‌تاک ناموفق بود.")
+
 # ---------------------------------------------------------
 # هندلرهای تلگرام
 # ---------------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "💎 <b>سلام! ربات با قابلیت جدید دانلود پست‌های عکسی و ریلز آماده است.</b>\n\n"
+        "💎 <b>سلام! ربات با رفع کامل خطای پست‌های عکسی اینستاگرام آماده است.</b>\n\n"
         "🔗 لینک اسپاتیفای، اینستاگرام، یوتیوب یا تیک‌تاک خود را ارسال کنید:"
     )
     await update.message.reply_text(welcome_text, parse_mode="HTML")
@@ -295,18 +320,16 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if data == "fmt_audio": filename = os.path.splitext(filename)[0] + ".mp3"
                         res_title = download_info.get('title', 'Media')
 
-        if not filename and downloaded_files:
-            if len(downloaded_files) == 1:
-                filename = downloaded_files[0]
+        if not filename and len(downloaded_files) == 1:
+            filename = downloaded_files[0]
 
         if not filename and not downloaded_files:
             raise Exception("فایل یافت نشد.")
 
-        # اگر چند فایل (اسلایدر عکس یا آلبوم) دانلود شد به صورت گروهی ارسال کن
         if len(downloaded_files) > 1:
             media_group = []
             for f in downloaded_files:
-                if f.lower().endswith(('.mp4', '.mkv', '.mov')):
+                if f.lower().endswith(('.mp4', '.mkv', '.mov', '.webm')):
                     media_group.append(InputMediaVideo(open(f, 'rb')))
                 else:
                     media_group.append(InputMediaPhoto(open(f, 'rb')))
