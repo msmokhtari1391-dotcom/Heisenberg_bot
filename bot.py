@@ -57,6 +57,66 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
         return latest_file
     return None
 
+def download_instagram_pure(url, target_dir):
+    """استخراج مستقیم و هوشمند عکس‌ها و ویدیوهای اینستاگرام"""
+    clean_url = url.split('?')[0].rstrip('/')
+    session = requests.Session()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    }
+    
+    # روش اول: استفاده از سرویس کمکی API
+    api_url = f"https://api.vkrdown.com/insta/?url={clean_url}"
+    try:
+        res = session.get(api_url, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            media_list = data.get('data', []) or data.get('downloads', [])
+            downloaded_paths = []
+            
+            for idx, item in enumerate(media_list):
+                m_url = item.get('url') or item.get('download_url')
+                if m_url:
+                    is_video = item.get('type') == 'video' or '.mp4' in m_url
+                    ext = '.mp4' if is_video else '.jpg'
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx}{ext}")
+                    m_res = session.get(m_url, stream=True, timeout=15)
+                    if m_res.status_code == 200:
+                        with open(out_path, 'wb') as f:
+                            for chunk in m_res.iter_content(chunk_size=8192):
+                                if chunk: f.write(chunk)
+                        downloaded_paths.append(out_path)
+            
+            if downloaded_paths:
+                return downloaded_paths
+    except Exception:
+        pass
+
+    # روش دوم: استخراج مستقیم HTML در صورت ناموفق بودن API
+    try:
+        embed_url = f"{clean_url}/embed/captioned/"
+        res = session.get(embed_url, headers=headers, timeout=12)
+        if res.status_code == 200:
+            html = res.text
+            # پیدا کردن عکس‌ها
+            img_matches = re.findall(r'class="EmbeddedMediaImage"\s+src="([^"]+)"', html) or \
+                          re.findall(r'FFIMAGE.*?src="([^"]+)"', html) or \
+                          re.findall(r'https://scontent[^"]+\.jpg[^"]*', html)
+            
+            if img_matches:
+                img_url = img_matches[0].replace('&amp;', '&')
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}.jpg")
+                img_res = session.get(img_url, timeout=15)
+                if img_res.status_code == 200:
+                    with open(out_path, 'wb') as f:
+                        f.write(img_res.content)
+                    return [out_path]
+    except Exception:
+        pass
+
+    raise Exception("امکان استخراج عکس/ویدیوی اینستاگرام وجود نداشت.")
+
 def get_spotify_details_pure(url):
     try:
         clean_url = url.split('?')[0]
@@ -270,7 +330,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
         "▫️ <b>Spotify & SoundCloud</b> (موزیک با کاور و تگ)\n"
         "▫️ <b>YouTube & YouTube Music</b> (کیفیت‌های مختلف + MP3)\n"
-        "▫️ <b>Instagram</b> (پست، ریلز و آلبوم‌های عکس/ویدیو)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و عکس‌های تک/اسلایدی)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
         "▫️ <b>Pinterest & Reddit</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
@@ -360,7 +420,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "instagram.com" in url:
-        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز / آلبوم", callback_data="fmt_best")]]
+        keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز / عکس", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
         await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -464,12 +524,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'ignoreerrors': True
     }
     
-    if is_instagram:
-        ydl_opts['format'] = 'bestvideo+bestaudio/best'
-        ydl_opts['writethumbnails'] = True
-        ydl_opts['outtmpl'] = 'downloads/ig_%(id)s_%(autonumber)s.%(ext)s'
-        ydl_opts['allsubtitles'] = False
-    
     is_audio = data == "fmt_audio" or data.startswith("spo_")
     
     if is_audio:
@@ -510,7 +564,33 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await edit_message_safe(query, "⚡️ <b>در حال اتصال به سرور...</b>")
         
-        if is_tiktok:
+        # استخراج اختصاصی اینستاگرام (برای دور زدن خطای yt-dlp روی عکس‌ها)
+        if is_instagram:
+            try:
+                ig_files = await main_loop.run_in_executor(
+                    None, lambda: download_instagram_pure(download_url, 'downloads')
+                )
+                if ig_files:
+                    if len(ig_files) > 1:
+                        media_group = []
+                        for f in ig_files[:10]:
+                            _, f_ext = os.path.splitext(f.lower())
+                            if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                media_group.append(InputMediaPhoto(open(f, 'rb')))
+                            elif f_ext in ['.mp4']:
+                                media_group.append(InputMediaVideo(open(f, 'rb')))
+                        
+                        await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
+                        for f in ig_files:
+                            if os.path.exists(f): os.remove(f)
+                        await query.message.delete()
+                        return
+                    else:
+                        filename = ig_files[0]
+            except Exception:
+                pass
+
+        if is_tiktok and not filename:
             try:
                 filename, res_title, is_image_doc = await main_loop.run_in_executor(
                     None, lambda: download_tiktok_pure(download_url, 'downloads')
@@ -532,6 +612,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except: pass
         
+        # اگر روش‌های اختصاصی جواب نداد، رفتن سراغ yt-dlp
         if not filename:
             files_before = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
             
@@ -541,38 +622,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             files_after = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
             new_files = list(files_after - files_before)
 
-            if is_instagram and new_files:
-                media_files = []
-                for f in new_files:
-                    full_path = os.path.join('downloads', f)
-                    _, ext = os.path.splitext(f.lower())
-                    if ext in ['.jpg', '.jpeg', '.png', '.webp', '.mp4']:
-                        media_files.append(full_path)
-                
-                if media_files:
-                    if len(media_files) > 1:
-                        media_group = []
-                        for f in media_files[:10]: # حداکثر ۱۰ رسانه در یک آلبوم تلگرام
-                            _, f_ext = os.path.splitext(f.lower())
-                            if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                                media_group.append(InputMediaPhoto(open(f, 'rb')))
-                            elif f_ext in ['.mp4']:
-                                media_group.append(InputMediaVideo(open(f, 'rb')))
-                        
-                        await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
-                        
-                        for f in media_files:
-                            if os.path.exists(f): os.remove(f)
-                        await query.message.delete()
-                        return
-                    else:
-                        filename = media_files[0]
-
-            if not filename:
-                if new_files:
-                    filename = os.path.join('downloads', new_files[0])
-                else:
-                    filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
+            if new_files:
+                filename = os.path.join('downloads', new_files[0])
+            else:
+                filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
 
         if not filename or not os.path.exists(filename):
             raise Exception("فایل موردنظر دانلود نشد.")
@@ -642,7 +695,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running successfully with Instagram album/photo support!")
+    print("Bot is running with full Instagram photo/video bypass!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
