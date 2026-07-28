@@ -59,104 +59,133 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 # ---------------------------------------------------------
-# بخش اینستاگرام (مستقیم با yt-dlp)
+# بخش اینستاگرام (مقاوم در برابر بن IP با چرخنده API)
 # ---------------------------------------------------------
 def download_instagram_pure(url, target_dir):
     clean_url = url.split('?')[0].rstrip('/')
+    session = requests.Session()
+    session.headers.update(BROWSER_HEADERS)
     
-    ydl_opts = {
-        'outtmpl': os.path.join(target_dir, f"ig_{int(time.time())}_%(no_overwrites)s.%(ext)s"),
-        'quiet': True,
-        'no_warnings': True,
-        'http_headers': BROWSER_HEADERS,
-        'format': 'bestvideo+bestaudio/best',
-    }
+    downloaded_paths = []
 
-    files_before = set(os.listdir(target_dir)) if os.path.exists(target_dir) else set()
+    # API 1: Cobalt Engine (نمونه‌های متعدد)
+    cobalt_instances = [
+        "https://api.cobalt.tools/",
+        "https://cobalt-api.kwiatekm.tokyo/",
+        "https://co.wuk.sh/",
+        "https://cobalt.q1.i.ng/"
+    ]
+    
+    for endpoint in cobalt_instances:
+        try:
+            payload = {"url": clean_url, "videoQuality": "max", "filenamePattern": "basic"}
+            res = session.post(endpoint, json=payload, headers={"Accept": "application/json", "Content-Type": "application/json"}, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                status = data.get("status")
+                
+                if status in ["redirect", "tunnel"]:
+                    media_url = data.get("url")
+                    ext = ".mp4" if (".mp4" in media_url or "video" in media_url.lower()) else ".jpg"
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_00{ext}")
+                    
+                    r = session.get(media_url, stream=True, timeout=20)
+                    if r.status_code == 200:
+                        with open(out_path, 'wb') as f:
+                            for chunk in r.iter_content(8192): f.write(chunk)
+                        return [out_path]
 
+                elif status == "picker":
+                    for idx, item in enumerate(data.get("picker", [])):
+                        media_url = item.get("url")
+                        ext = ".mp4" if item.get("type") == "video" else ".jpg"
+                        out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}{ext}")
+                        r = session.get(media_url, stream=True, timeout=20)
+                        if r.status_code == 200:
+                            with open(out_path, 'wb') as f:
+                                for chunk in r.iter_content(8192): f.write(chunk)
+                            downloaded_paths.append(out_path)
+                    if downloaded_paths:
+                        return sorted(downloaded_paths)
+        except Exception:
+            continue
+
+    # API 2: TikWM Backup API
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([clean_url])
+        backup_api = f"https://api.v2.tikwm.com/api/?url={clean_url}"
+        res = session.get(backup_api, timeout=10).json()
+        if res.get("data"):
+            data = res["data"]
+            if "images" in data and data["images"]:
+                for idx, img_u in enumerate(data["images"]):
+                    out_path = os.path.join(target_dir, f"ig_{int(time.time())}_{idx:02d}.jpg")
+                    r = session.get(img_u, timeout=15)
+                    if r.status_code == 200:
+                        with open(out_path, 'wb') as f: f.write(r.content)
+                        downloaded_paths.append(out_path)
+                if downloaded_paths:
+                    return downloaded_paths
 
-        files_after = set(os.listdir(target_dir)) if os.path.exists(target_dir) else set()
-        downloaded = list(files_after - files_before)
-
-        if downloaded:
-            return [os.path.join(target_dir, f) for f in downloaded]
-        else:
-            latest = find_latest_downloaded_file(target_dir, max_age_seconds=60)
-            if latest:
-                return [latest]
+            v_url = data.get("play") or data.get("wmplay")
+            if v_url:
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_backup.mp4")
+                r = session.get(v_url, stream=True, timeout=15)
+                if r.status_code == 200:
+                    with open(out_path, 'wb') as f:
+                        for chunk in r.iter_content(8192): f.write(chunk)
+                    return [out_path]
     except Exception:
         pass
 
-    raise Exception("دریافت رسانه اینستاگرام ناموفق بود. ممکن است پیج خصوصی باشد.")
+    # API 3: DDInstagram Direct Proxy
+    try:
+        dd_url = clean_url.replace("instagram.com", "ddinstagram.com")
+        r = session.get(dd_url, timeout=10)
+        if r.status_code == 200:
+            videos = re.findall(r'property="og:video" content="([^"]+)"', r.text)
+            images = re.findall(r'property="og:image" content="([^"]+)"', r.text)
+            
+            target_media = videos[0] if videos else (images[0] if images else None)
+            if target_media:
+                target_media = target_media.replace("&amp;", "&")
+                ext = ".mp4" if videos else ".jpg"
+                out_path = os.path.join(target_dir, f"ig_{int(time.time())}_dd{ext}")
+                media_res = session.get(target_media, stream=True, timeout=20)
+                if media_res.status_code == 200:
+                    with open(out_path, 'wb') as f:
+                        for chunk in media_res.iter_content(8192): f.write(chunk)
+                    return [out_path]
+    except Exception:
+        pass
+
+    raise Exception("اینستاگرام اجازه دریافت این پست را نداد (پست خصوصی است یا لینک معتبر نیست).")
 
 # ---------------------------------------------------------
 # بخش اسپاتیفای
 # ---------------------------------------------------------
 def get_spotify_details_pure(url):
     clean_url = url.split('?')[0]
-    headers = {
-        'User-Agent': BROWSER_HEADERS['User-Agent'],
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
-    
-    title = "Track"
-    artist = "نامشخص"
-    thumbnail = None
+    headers = {'User-Agent': BROWSER_HEADERS['User-Agent'], 'Accept-Language': 'en-US,en;q=0.9'}
+    title, artist, thumbnail = "Track", "نامشخص", None
 
     try:
         res = requests.get(clean_url, headers=headers, timeout=10)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            
             og_title = soup.find('meta', property='og:title')
-            if og_title and og_title.get('content'):
-                title = og_title['content']
-                
+            if og_title and og_title.get('content'): title = og_title['content']
             og_img = soup.find('meta', property='og:image')
-            if og_img and og_img.get('content'):
-                thumbnail = og_img['content']
-
+            if og_img and og_img.get('content'): thumbnail = og_img['content']
             meta_artist = soup.find('meta', property='music:musician') or soup.find('meta', name='twitter:audio:artist_name')
-            if meta_artist and meta_artist.get('content'):
-                artist = meta_artist['content']
+            if meta_artist and meta_artist.get('content'): artist = meta_artist['content']
             else:
                 og_desc = soup.find('meta', property='og:description')
                 if og_desc and og_desc.get('content'):
                     desc = og_desc['content']
-                    if "·" in desc:
-                        parts = desc.split("·")
-                        artist = parts[0].replace("Listen to", "").strip()
-                    elif "Song ·" in desc:
-                        artist = desc.split("Song ·")[1].split("·")[0].strip()
-                        
+                    if "·" in desc: artist = desc.split("·")[0].replace("Listen to", "").strip()
+                    elif "Song ·" in desc: artist = desc.split("Song ·")[1].split("·")[0].strip()
             if artist != "نامشخص" and title != "Track":
                 return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
-    except Exception:
-        pass
-
-    try:
-        oembed_url = f"https://open.spotify.com/oembed?url={clean_url}"
-        res = requests.get(oembed_url, headers=headers, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            title_full = data.get('title', '')
-            thumbnail = thumbnail or data.get('thumbnail_url')
-            
-            if " by " in title_full:
-                parts = title_full.rsplit(" by ", 1)
-                title = parts[0].strip()
-                artist = parts[1].strip()
-            elif " - " in title_full:
-                parts = title_full.split(" - ", 1)
-                artist = parts[0].strip()
-                title = parts[1].strip()
-            else:
-                title = title_full
-
-            return {'title': title, 'artist': artist, 'thumbnail': thumbnail}
     except Exception:
         pass
 
@@ -168,67 +197,23 @@ def get_spotify_details_pure(url):
 def download_pinterest_pure(url, target_dir):
     headers = BROWSER_HEADERS.copy()
     session = requests.Session()
-    
     response = session.get(url, headers=headers, allow_redirects=True, timeout=15)
     html_text = response.text
     
-    video_url = None
-    script_data = re.search(r'<script[^>]*id="__PWS_DATA__"[^>]*>(.*?)</script>', html_text, re.DOTALL)
-    if script_data:
-        try:
-            json_raw = script_data.group(1)
-            data = json.loads(json_raw)
-            props = data.get('props', {}).get('initialState', {}).get('pins', {})
-            for pin_id in props:
-                pin_info = props[pin_id]
-                videos = pin_info.get('videos', {}).get('video_list', {})
-                if videos:
-                    best_v = None
-                    max_width = 0
-                    for v_key, v_val in videos.items():
-                        if isinstance(v_val, dict) and v_val.get('url'):
-                            w = v_val.get('width', 0)
-                            if w >= max_width:
-                                max_width = w
-                                best_v = v_val.get('url')
-                    if best_v:
-                        video_url = best_v
-                        break
-                
-                if not video_url:
-                    images = pin_info.get('images', {})
-                    main_img = images.get('originals', {}).get('url') or images.get('v736x', {}).get('url')
-                    if main_img:
-                        target_path = os.path.join(target_dir, f"pin_{int(time.time())}.jpg")
-                        img_resp = session.get(main_img, headers=headers, timeout=15)
-                        if img_resp.status_code == 200:
-                            with open(target_path, 'wb') as f: f.write(img_resp.content)
-                            return target_path, True
-        except:
-            pass
-
-    if not video_url:
-        v_match = re.search(r'https://v1\.pinimg\.com/videos/[a-zA-Z0-9/_.-]+\.mp4', html_text) or \
-                  re.search(r'https://v\.pinimg\.com/videos/[a-zA-Z0-9/_.-]+\.mp4', html_text)
-        if v_match:
-            video_url = v_match.group(0)
-
-    if video_url:
+    v_match = re.search(r'https://v1\.pinimg\.com/videos/[a-zA-Z0-9/_.-]+\.mp4', html_text) or \
+              re.search(r'https://v\.pinimg\.com/videos/[a-zA-Z0-9/_.-]+\.mp4', html_text)
+    if v_match:
         target_path = os.path.join(target_dir, f"pin_{int(time.time())}.mp4")
-        v_resp = session.get(video_url, headers=headers, stream=True, timeout=20)
+        v_resp = session.get(v_match.group(0), headers=headers, stream=True, timeout=20)
         if v_resp.status_code == 200:
             with open(target_path, 'wb') as f:
-                for chunk in v_resp.iter_content(chunk_size=8192):
-                    if chunk: f.write(chunk)
+                for chunk in v_resp.iter_content(chunk_size=8192): f.write(chunk)
             return target_path, False
 
     img_urls = re.findall(r'https://i\.pinimg\.com/[a-zA-Z0-9/_.-]+\.(?:jpg|png|webp|jpeg)', html_text)
-    filtered_urls = [img for img in img_urls if "/user/" not in img and "avatar" not in img.lower() and "/75x75" not in img]
-    
-    main_img = filtered_urls[0] if filtered_urls else None
-
-    if main_img:
-        main_img = re.sub(r'/(?:136x136|236x|474x|736x|736X)/', '/originals/', main_img)
+    filtered = [img for img in img_urls if "/user/" not in img and "avatar" not in img.lower()]
+    if filtered:
+        main_img = re.sub(r'/(?:136x136|236x|474x|736x|736X)/', '/originals/', filtered[0])
         target_path = os.path.join(target_dir, f"pin_{int(time.time())}.jpg")
         img_resp = session.get(main_img, headers=headers, timeout=15)
         if img_resp.status_code == 200:
@@ -240,23 +225,17 @@ def download_pinterest_pure(url, target_dir):
 def download_tiktok_pure(url, target_dir):
     session = requests.Session()
     api_url = f"https://api.tiklydown.eu.org/api/download?url={url}"
-    headers = BROWSER_HEADERS.copy()
-    
-    res = session.get(api_url, headers=headers, timeout=15)
+    res = session.get(api_url, headers=BROWSER_HEADERS, timeout=15)
     if res.status_code == 200:
         data = res.json()
-        title = data.get('title', 'TikTok Media')
-        title = re.sub(r'[\\/*?:"<>|]', "", title)
-        
-        video_data = data.get('video', {})
-        v_url = video_data.get('noWatermark') or video_data.get('watermark')
+        title = re.sub(r'[\\/*?:"<>|]', "", data.get('title', 'TikTok Media'))
+        v_url = data.get('video', {}).get('noWatermark') or data.get('video', {}).get('watermark')
         if v_url:
             out_path = os.path.join(target_dir, f"tt_{int(time.time())}.mp4")
-            v_res = session.get(v_url, headers=headers, stream=True)
+            v_res = session.get(v_url, headers=BROWSER_HEADERS, stream=True)
             if v_res.status_code == 200:
                 with open(out_path, 'wb') as f:
-                    for chunk in v_res.iter_content(chunk_size=8192):
-                        if chunk: f.write(chunk)
+                    for chunk in v_res.iter_content(chunk_size=8192): f.write(chunk)
                 return out_path, title, False
 
     raise Exception("دریافت ویدیو از تیک‌تاک ناموفق بود.")
@@ -264,14 +243,13 @@ def download_tiktok_pure(url, target_dir):
 # ---------------------------------------------------------
 # هندلرهای تلگرام
 # ---------------------------------------------------------
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "💎 <b>سلام؛ به ربات دانلودر پیشرفته خوش آمدید!</b>\n\n"
         "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
         "▫️ <b>Spotify & SoundCloud</b>\n"
         "▫️ <b>YouTube & YouTube Music</b>\n"
-        "▫️ <b>Instagram</b> (پست، ریلز و تمام اسلایدهای کاروسل)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و کاروسل)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
         "▫️ <b>Pinterest</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
@@ -280,15 +258,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if not message or not message.text:
-        return
-
+    if not message or not message.text: return
     text = message.text.strip()
     
-    try:
-        await message.set_reaction("🔥")
-    except Exception:
-        pass
+    try: await message.set_reaction("🔥")
+    except Exception: pass
 
     if not text.startswith(("http://", "https://")):
         await message.reply_text("❌ <b>لطفاً یک لینک معتبر ارسال کنید.</b>", parse_mode="HTML")
@@ -304,46 +278,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "spotify.com" in url:
-        progress_msg = await update.message.reply_text("🔍 <b>در حال استخراج اطلاعات از اسپاتیفای...</b>", parse_mode="HTML")
+        progress_msg = await update.message.reply_text("🔍 <b>در حال استخراج اطلاعات اسپاتیفای...</b>", parse_mode="HTML")
         details = await asyncio.get_event_loop().run_in_executor(None, lambda: get_spotify_details_pure(url))
         await progress_msg.delete()
         
-        title = details['title']
-        artist = details['artist']
-        thumbnail = details['thumbnail']
-        
         context.user_data['url'] = url
-        context.user_data['info'] = {'title': title, 'artist': artist, 'is_audio_only': True}
-        
+        context.user_data['info'] = {'title': details['title'], 'artist': details['artist'], 'is_audio_only': True}
         keyboard = [
             [InlineKeyboardButton("❤️ دانلود از YouTube Music", callback_data="spo_ytm")],
             [InlineKeyboardButton("🧡 دانلود از SoundCloud", callback_data="spo_sc")]
         ]
-        
-        caption = f"🎵 <b>{title}</b>\n👤 <b>خواننده: {artist}</b>\n\n✨ <b>منبع دانلود را انتخاب کنید:</b>"
-        if thumbnail:
-            await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        caption = f"🎵 <b>{details['title']}</b>\n👤 <b>خواننده: {details['artist']}</b>\n\n✨ <b>منبع دانلود را انتخاب کنید:</b>"
+        if details['thumbnail']:
+            await update.message.reply_photo(photo=details['thumbnail'], caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if "soundcloud.com" in url:
-        progress_msg = await update.message.reply_text("🔍 <b>بررسی ساندکلاد...</b>", parse_mode="HTML")
-        sc_title, sc_thumbnail = "SoundCloud Track", None
-        try:
-            ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'http_headers': BROWSER_HEADERS}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                sc_info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(url, download=False))
-                sc_title = sc_info.get('title', 'SoundCloud Track')
-                sc_thumbnail = sc_info.get('thumbnail')
-        except: pass
-        await progress_msg.delete()
         context.user_data['url'] = url
-        context.user_data['info'] = {'is_audio_only': True, 'title': sc_title}
+        context.user_data['info'] = {'is_audio_only': True, 'title': 'SoundCloud Track'}
         keyboard = [[InlineKeyboardButton("🎧 دانلود فایل صوتی (MP3)", callback_data="fmt_audio")]]
-        caption = f"🎧 <b>موزیک ساندکلاد:</b>\n📌 {sc_title}"
-        if sc_thumbnail: await update.message.reply_photo(photo=sc_thumbnail, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-        else: await update.message.reply_text(caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("🎧 <b>ساندکلاد شناسایی شد:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     if "pinterest" in url or "pin.it" in url:
@@ -357,7 +313,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("📥 دانلود پست / ریلز", callback_data="fmt_best")]]
         context.user_data['url'] = url
         context.user_data['info'] = {'title': 'Instagram Media', 'is_audio_only': False}
-        await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد.</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text("🎬 <b>اینستاگرام شناسایی شد. روی دانلود کلیک کنید:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
     progress_msg = await update.message.reply_text("🧠 <b>در حال استخراج کیفیت‌ها...</b>", parse_mode="HTML")
@@ -403,10 +359,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit_message_safe(query, text):
     try:
-        if query.message.photo or query.message.caption: 
-            await query.message.edit_caption(caption=text, parse_mode="HTML")
-        else: 
-            await query.edit_message_text(text=text, parse_mode="HTML")
+        if query.message.photo or query.message.caption: await query.message.edit_caption(caption=text, parse_mode="HTML")
+        else: await query.edit_message_text(text=text, parse_mode="HTML")
     except: pass
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -422,27 +376,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     main_loop = asyncio.get_running_loop()
-    last_update_time = time.time()
     
-    def progress_hook(d):
-        nonlocal last_update_time
-        current_time = time.time()
-        if d['status'] == 'finished':
-            asyncio.run_coroutine_threadsafe(edit_message_safe(query, "⚡️ <b>دانلود کامل شد! در حال ارسال...</b>"), main_loop)
-            return
-        if d['status'] == 'downloading' and current_time - last_update_time > 0.8:
-            last_update_time = current_time
-            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            downloaded = d.get('downloaded_bytes', 0)
-            if total > 0:
-                percent = (downloaded / total) * 100
-                speed = d.get('speed', 0) or 0
-                speed_mb = speed / (1024 * 1024) if speed > 0 else 0
-                filled_blocks = int(percent // 10)
-                bar = "🟦" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📥 <b>در حال دانلود...</b>\n\n{bar} <code>{percent:.1f}%</code> \n🚀 <b>سرعت:</b> <code>{speed_mb:.2f} MB/s</code>"
-                asyncio.run_coroutine_threadsafe(edit_message_safe(query, status_text), main_loop)
-
     is_pinterest = "pinterest" in url or "pin.it" in url
     is_instagram = "instagram.com" in url
     is_tiktok = "tiktok.com" in url or "vm.tiktok.com" in url
@@ -452,20 +386,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'progress_hooks': [progress_hook],
         'http_headers': BROWSER_HEADERS,
         'ignoreerrors': True
     }
     
     is_audio = data == "fmt_audio" or data.startswith("spo_")
-    
     if is_audio:
         ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192'
-        }]
     elif not is_instagram and data.startswith("vid_"):
         fmt_id = data.split("_")[1]
         ydl_opts['format'] = f"{fmt_id}+bestaudio/best"
@@ -478,14 +405,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ydl_opts['merge_output_format'] = 'mp4'
 
     if data.startswith("spo_"):
-        track_title = info.get('title', '')
-        track_artist = info.get('artist', '')
-        search_query = f"{track_artist} {track_title}".strip()
-        
-        if data == "spo_ytm":
-            download_url = f"ytsearch1:{search_query} audio"
-        else:
-            download_url = f"scsearch1:{search_query}"
+        search_query = f"{info.get('artist', '')} {info.get('title', '')}".strip()
+        download_url = f"ytsearch1:{search_query} audio" if data == "spo_ytm" else f"scsearch1:{search_query}"
         ydl_opts['default_search'] = 'auto'
     else:
         download_url = url
@@ -495,15 +416,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_image_doc = False
     
     try:
-        await edit_message_safe(query, "⚡️ <b>در حال دانلود رسانه...</b>")
+        await edit_message_safe(query, "⚡️ <b>در حال دریافت رسانه...</b>")
         
         if is_instagram:
             try:
-                ig_files = await main_loop.run_in_executor(
-                    None, lambda: download_instagram_pure(download_url, 'downloads')
-                )
+                ig_files = await main_loop.run_in_executor(None, lambda: download_instagram_pure(download_url, 'downloads'))
                 if ig_files:
-                    ig_files.sort()
                     if len(ig_files) == 1:
                         filename = ig_files[0]
                     else:
@@ -512,13 +430,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             media_group = []
                             for f in chunk_files:
                                 _, f_ext = os.path.splitext(f.lower())
-                                if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                                    media_group.append(InputMediaPhoto(open(f, 'rb')))
-                                elif f_ext in ['.mp4']:
-                                    media_group.append(InputMediaVideo(open(f, 'rb')))
-                            
-                            if media_group:
-                                await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
+                                if f_ext in ['.jpg', '.jpeg', '.png', '.webp']: media_group.append(InputMediaPhoto(open(f, 'rb')))
+                                elif f_ext in ['.mp4']: media_group.append(InputMediaVideo(open(f, 'rb')))
+                            if media_group: await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
                         
                         for f in ig_files:
                             if os.path.exists(f): os.remove(f)
@@ -528,103 +442,54 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise Exception(str(e))
 
         if is_tiktok and not filename:
-            try:
-                filename, res_title, is_image_doc = await main_loop.run_in_executor(
-                    None, lambda: download_tiktok_pure(download_url, 'downloads')
-                )
+            try: filename, res_title, is_image_doc = await main_loop.run_in_executor(None, lambda: download_tiktok_pure(download_url, 'downloads'))
             except: pass
 
         if is_pinterest and not filename:
             try:
-                filename, is_image_doc = await main_loop.run_in_executor(
-                    None, lambda: download_pinterest_pure(download_url, 'downloads')
-                )
+                filename, is_image_doc = await main_loop.run_in_executor(None, lambda: download_pinterest_pure(download_url, 'downloads'))
                 res_title = "Pinterest Media"
             except: pass
         
         if not filename:
             files_before = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
-            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 await main_loop.run_in_executor(None, lambda: ydl.extract_info(download_url, download=True))
-
             files_after = set(os.listdir('downloads')) if os.path.exists('downloads') else set()
             new_files = list(files_after - files_before)
-
-            if new_files:
-                filename = os.path.join('downloads', new_files[0])
-            else:
-                filename = find_latest_downloaded_file('downloads', max_age_seconds=120)
+            filename = os.path.join('downloads', new_files[0]) if new_files else find_latest_downloaded_file('downloads', max_age_seconds=120)
 
         if not filename or not os.path.exists(filename):
-            raise Exception("فایل موردنظر دانلود نشد.")
+            raise Exception("فایل دانلود نشد.")
 
         chat_id = query.message.chat_id
-
-        last_upload_update = time.time()
-        uploaded_bytes = 0
-
-        def sync_upload_progress(chunk_len, total_bytes):
-            nonlocal last_upload_update, uploaded_bytes
-            uploaded_bytes += chunk_len
-            now = time.time()
-            if now - last_upload_update > 0.8 or uploaded_bytes == total_bytes:
-                last_upload_update = now
-                percent = (uploaded_bytes / total_bytes) * 100
-                filled_blocks = int(percent // 10)
-                bar = "🟩" * filled_blocks + "⬜" * (10 - filled_blocks)
-                status_text = f"📤 <b>در حال آپلود به تلگرام...</b>\n\n{bar} <code>{percent:.1f}%</code>"
-                context.application.create_task(edit_message_safe(query, status_text))
-
         _, ext = os.path.splitext(filename.lower())
         
-        with ProgressFileWriter(filename, sync_upload_progress) as tracked_file:
+        with open(filename, 'rb') as tracked_file:
             safe_title = str(res_title).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            
             if is_audio or ext in ['.mp3', '.m4a', '.ogg', '.wav', '.flac']:
                 artist_name = str(info.get('artist', 'نامشخص')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 song_title = str(info.get('title', res_title)).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                caption_text = f"🎵 <b>{song_title}</b>\n👤 <b>خواننده:</b> {artist_name}"
-                await context.bot.send_audio(
-                    chat_id=chat_id, audio=tracked_file, 
-                    filename=os.path.basename(filename),
-                    caption=caption_text, 
-                    performer=artist_name, 
-                    title=song_title,
-                    read_timeout=180, write_timeout=180, parse_mode="HTML"
-                )
+                await context.bot.send_audio(chat_id=chat_id, audio=tracked_file, filename=os.path.basename(filename), caption=f"🎵 <b>{song_title}</b>\n👤 <b>خواننده:</b> {artist_name}", parse_mode="HTML")
             elif (ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif'] or is_image_doc) and ext != '.mp4':
-                await context.bot.send_photo(
-                    chat_id=chat_id, photo=tracked_file,
-                    caption=f"🖼️ <b>{safe_title}</b>", parse_mode="HTML"
-                )
+                await context.bot.send_photo(chat_id=chat_id, photo=tracked_file, caption=f"🖼️ <b>{safe_title}</b>", parse_mode="HTML")
             else:
-                await context.bot.send_video(
-                    chat_id=chat_id, video=tracked_file, filename=os.path.basename(filename),
-                    caption=f"🎬 <b>{safe_title}</b>", 
-                    read_timeout=180, write_timeout=180, parse_mode="HTML"
-                )
+                await context.bot.send_video(chat_id=chat_id, video=tracked_file, filename=os.path.basename(filename), caption=f"🎬 <b>{safe_title}</b>", parse_mode="HTML")
         
-        if filename and os.path.exists(filename): 
-            os.remove(filename)
+        if filename and os.path.exists(filename): os.remove(filename)
         await query.message.delete()
         
     except Exception as e:
-        if filename and os.path.exists(filename): 
-            os.remove(filename)
+        if filename and os.path.exists(filename): os.remove(filename)
         clean_err = str(e).replace("ERROR:", "").strip()
         await query.message.reply_text(f"❌ <b>خطا در پردازش یا ارسال:</b>\n<code>{clean_err}</code>", parse_mode="HTML")
 
 def main():
-    if not os.path.exists('downloads'): 
-        os.makedirs('downloads')
-    
+    if not os.path.exists('downloads'): os.makedirs('downloads')
     app = Application.builder().token(TOKEN).connect_timeout(180).read_timeout(180).write_timeout(180).pool_timeout(180).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    
     print("Bot is running...")
     app.run_polling(drop_pending_updates=True)
 
