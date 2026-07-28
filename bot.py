@@ -14,7 +14,7 @@ import yt_dlp
 TOKEN = '8897975172:AAFXrND5_zFFeSsGDxD9lYdF32zwhTFtpds'
 
 BROWSER_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
 }
@@ -58,7 +58,7 @@ def find_latest_downloaded_file(target_dir='downloads', max_age_seconds=120):
     return None
 
 def download_instagram_pure(url, target_dir):
-    """استخراج کامل تمام اسلایدهای کاروسل اینستاگرام (پشتیبانی از پست‌های چندسلایدی طولانی مثل ۱۷ اسلایدی)"""
+    """استخراج کامل تمام اسلایدهای کاروسل اینستاگرام (پشتیبانی تا ۲۵ اسلاید)"""
     clean_url = url.split('?')[0].rstrip('/')
     shortcode = clean_url.split('/p/')[-1].split('/reel/')[-1].split('/')[0]
     session = requests.Session()
@@ -66,66 +66,48 @@ def download_instagram_pure(url, target_dir):
     headers = {
         'User-Agent': BROWSER_HEADERS['User-Agent'],
         'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
     }
 
     downloaded_paths = []
 
-    # روش اول: استفاده از API سرویس vxinstagram (مخصوص دریافت کامل کاروسل‌ها)
-    try:
-        api_url = f"https://api.vxinstagram.com/post/{shortcode}"
-        res = session.get(api_url, headers=headers, timeout=12)
-        if res.status_code == 200:
-            data = res.json()
-            media_list = data.get('media_list', []) or data.get('media', [])
-            
-            for idx, item in enumerate(media_list):
-                m_url = item.get('url') if isinstance(item, dict) else item
-                m_type = item.get('type') if isinstance(item, dict) else ''
-                if m_url:
-                    ext = '.mp4' if m_type == 'video' or '.mp4' in m_url else '.jpg'
-                    out_path = os.path.join(target_dir, f"ig_{shortcode}_{idx:02d}{ext}")
-                    
-                    m_res = session.get(m_url, stream=True, timeout=15)
-                    if m_res.status_code == 200:
-                        with open(out_path, 'wb') as f:
-                            for chunk in m_res.iter_content(8192): f.write(chunk)
-                        downloaded_paths.append(out_path)
+    # روش اول: اسکرپ مستقیم اسلایدها از سرور ddinstagram (فوق‌العاده سریع و بدون بن شدن)
+    for i in range(1, 25):
+        img_url = f"https://ddinstagram.com/images/{shortcode}/{i}"
+        vid_url = f"https://ddinstagram.com/videos/{shortcode}/{i}"
+        
+        # ۱. چک کردن ویدیو
+        try:
+            v_res = session.head(vid_url, headers=headers, allow_redirects=True, timeout=4)
+            if v_res.status_code == 200 and 'video' in v_res.headers.get('Content-Type', ''):
+                out_path = os.path.join(target_dir, f"ig_{shortcode}_{i-1:02d}.mp4")
+                r = session.get(vid_url, stream=True, timeout=10)
+                with open(out_path, 'wb') as f:
+                    for chunk in r.iter_content(8192): f.write(chunk)
+                downloaded_paths.append(out_path)
+                continue
+        except: pass
 
-            if downloaded_paths:
-                downloaded_paths.sort()
-                return downloaded_paths
-    except Exception:
-        pass
+        # ۲. چک کردن عکس
+        try:
+            i_res = session.head(img_url, headers=headers, allow_redirects=True, timeout=4)
+            if i_res.status_code == 200 and 'image' in i_res.headers.get('Content-Type', ''):
+                out_path = os.path.join(target_dir, f"ig_{shortcode}_{i-1:02d}.jpg")
+                r = session.get(img_url, stream=True, timeout=10)
+                with open(out_path, 'wb') as f:
+                    for chunk in r.iter_content(8192): f.write(chunk)
+                downloaded_paths.append(out_path)
+            else:
+                if i > 1:
+                    break
+        except:
+            if i > 1:
+                break
 
-    # روش دوم: استفاده از ddinstagram v2 API
-    try:
-        api_url = f"https://api.ddinstagram.com/v2/post/{shortcode}"
-        res = session.get(api_url, headers=headers, timeout=12)
-        if res.status_code == 200:
-            data = res.json()
-            items = data.get('carousel', []) or data.get('media', [])
-            if not items and data.get('url'):
-                items = [{'url': data.get('url'), 'type': data.get('type')}]
-                
-            for idx, item in enumerate(items):
-                m_url = item.get('url')
-                if m_url:
-                    ext = '.mp4' if item.get('type') == 'video' or '.mp4' in m_url else '.jpg'
-                    out_path = os.path.join(target_dir, f"ig_{shortcode}_{idx:02d}{ext}")
-                    m_res = session.get(m_url, stream=True, timeout=15)
-                    if m_res.status_code == 200:
-                        with open(out_path, 'wb') as f:
-                            for chunk in m_res.iter_content(8192): f.write(chunk)
-                        downloaded_paths.append(out_path)
+    if downloaded_paths:
+        downloaded_paths.sort()
+        return downloaded_paths
 
-            if downloaded_paths:
-                downloaded_paths.sort()
-                return downloaded_paths
-    except Exception:
-        pass
-
-    # روش سوم: دانلود مستقیم اسلایدها با yt-dlp
+    # روش دوم: دانلود مستقیم با yt-dlp
     try:
         ydl_opts = {
             'outtmpl': os.path.join(target_dir, f'ig_{shortcode}_%(playlist_index)02d.%(ext)s'),
@@ -146,7 +128,7 @@ def download_instagram_pure(url, target_dir):
     except Exception:
         pass
 
-    raise Exception("امکان دریافت اسلایدهای این پست وجود نداشت.")
+    raise Exception("دریافت اسلایدها ناموفق بود. مجدداً تلاش کنید.")
 
 def get_spotify_details_pure(url):
     try:
@@ -360,7 +342,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡️ <b>پلتفرم‌های پشتیبانی‌شده:</b>\n"
         "▫️ <b>Spotify & SoundCloud</b>\n"
         "▫️ <b>YouTube & YouTube Music</b>\n"
-        "▫️ <b>Instagram</b> (پست، ریلز و تمام اسلایدهای کاروسل بدون کراپ)\n"
+        "▫️ <b>Instagram</b> (پست، ریلز و تمام اسلایدهای کاروسل)\n"
         "▫️ <b>TikTok</b> (بدون واترمارک)\n"
         "▫️ <b>Pinterest & Reddit</b>\n\n"
         "🔗 <b>لینک رسانه خود را ارسال کنید:</b>"
@@ -592,37 +574,36 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_image_doc = False
     
     try:
-        await edit_message_safe(query, "⚡️ <b>در حال اتصال به سرور...</b>")
+        await edit_message_safe(query, "⚡️ <b>در حال دریافت اسلایدها...</b>")
         
-        # استخراج و ارسال کامل و مرتب تمام اسلایدهای اینستاگرام
+        # پردازش اختصاصی تمام اسلایدهای اینستاگرام
         if is_instagram:
             try:
                 ig_files = await main_loop.run_in_executor(
                     None, lambda: download_instagram_pure(download_url, 'downloads')
                 )
                 if ig_files:
-                    ig_files.sort()  # مرتب‌سازی اسلایدها به ترتیب شماره (۱ تا ۱۷)
-                    if len(ig_files) > 0:
-                        # ارسال در دسته‌های ۱۰ تایی (محدودیت آلبوم تلگرام)
-                        for i in range(0, len(ig_files), 10):
-                            chunk_files = ig_files[i:i + 10]
-                            media_group = []
-                            for f in chunk_files:
-                                _, f_ext = os.path.splitext(f.lower())
-                                if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                                    media_group.append(InputMediaPhoto(open(f, 'rb')))
-                                elif f_ext in ['.mp4']:
-                                    media_group.append(InputMediaVideo(open(f, 'rb')))
-                            
-                            if media_group:
-                                await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
+                    ig_files.sort()
+                    # ارسال در دسته‌های ۱۰ تایی تلگرام
+                    for i in range(0, len(ig_files), 10):
+                        chunk_files = ig_files[i:i + 10]
+                        media_group = []
+                        for f in chunk_files:
+                            _, f_ext = os.path.splitext(f.lower())
+                            if f_ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                media_group.append(InputMediaPhoto(open(f, 'rb')))
+                            elif f_ext in ['.mp4']:
+                                media_group.append(InputMediaVideo(open(f, 'rb')))
                         
-                        for f in ig_files:
-                            if os.path.exists(f): os.remove(f)
-                        await query.message.delete()
-                        return
-            except Exception:
-                pass
+                        if media_group:
+                            await context.bot.send_media_group(chat_id=query.message.chat_id, media=media_group)
+                    
+                    for f in ig_files:
+                        if os.path.exists(f): os.remove(f)
+                    await query.message.delete()
+                    return
+            except Exception as e:
+                raise Exception(str(e))
 
         if is_tiktok and not filename:
             try:
@@ -728,7 +709,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_click))
-    print("Bot is running with full carousel support!")
+    print("Bot is running...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
