@@ -740,7 +740,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     progress_msg = await update.message.reply_text("🧠 <b>در حال استخراج کیفیت‌ها...</b>", parse_mode="HTML")
     try:
-        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True, 'http_headers': BROWSER_HEADERS}
+        ydl_opts = {
+            'quiet': True, 'no_warnings': True, 'skip_download': True, 'noplaylist': True,
+            'http_headers': BROWSER_HEADERS,
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             meta = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(url, download=False))
 
@@ -750,14 +754,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['url'] = url
         context.user_data['info'] = {'title': title, 'is_audio_only': False}
 
+        # بهترین فرمت صوتی رو جدا پیدا می‌کنیم چون فایل نهایی ویدیو = ویدیو + این صدا (merge)
+        # پس حجم نمایش داده‌شده باید مجموع این دو باشه، نه فقط حجم استریم ویدیو.
+        audio_only_formats = [f for f in formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        best_audio_size = 0
+        if audio_only_formats:
+            best_audio = max(audio_only_formats, key=lambda x: x.get('abr') or 0)
+            best_audio_size = best_audio.get('filesize') or best_audio.get('filesize_approx') or 0
+
         keyboard = []
         seen_resolutions = set()
         for f in formats:
             if f.get('vcodec') != 'none' and f.get('height'):
                 res = f"{f.get('height')}p"
                 if res in seen_resolutions: continue
-                size = f.get('filesize') or f.get('filesize_approx')
-                size_mb = f"({size / (1024 * 1024):.1f} MB)" if size else ""
+                video_size = f.get('filesize') or f.get('filesize_approx') or 0
+                total_size = video_size + best_audio_size if video_size else 0
+                size_mb = f"({total_size / (1024 * 1024):.1f} MB)" if total_size else ""
                 fmt_id = f.get('format_id')
                 callback_id = f"vid_{fmt_id}" if ("youtube.com" in url or "youtu.be" in url) else f"direct_{fmt_id}"
                 keyboard.append([InlineKeyboardButton(f"🎬 کیفیت {res} {size_mb}", callback_data=callback_id)])
@@ -876,7 +889,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'noplaylist': True,
         'progress_hooks': [progress_hook],
         'http_headers': BROWSER_HEADERS,
-        'ignoreerrors': True
+        'ignoreerrors': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
     }
 
     is_audio = data == "fmt_audio" or data.startswith("spo_")
