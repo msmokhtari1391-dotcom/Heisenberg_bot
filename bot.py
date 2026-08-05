@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import yt_dlp
 import instaloader
 
-TOKEN = '8897975172:AAFXrND5_zFFeSsGDxD9lYdF32zwhTFtpds'
+TOKEN = '8897975172:AAGK-gJSpognGp6OA6HuUlsDSW1t-j1XMZc'
 
 # نمونه‌ی instaloader استفاده‌شده برای گرفتن پست‌های عمومی اینستاگرام با
 # کیفیت اصلی و کامل (شامل آلبوم/کروسل)، بدون نیاز به لاگین. بارها ساختنش
